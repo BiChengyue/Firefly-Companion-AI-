@@ -1,0 +1,35 @@
+{
+  "name": "firefly-companion",
+  "version": "0.2.0-alpha.54",
+  "private": true,
+  "description": "流萤桌面 Live2D AI 伴侣",
+  "license": "MIT",
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:frontend": "npm -w apps/desktop run dev",
+    "dev:server": "cd apps/server && python -m uvicorn main:app --port 8765",
+    "build": "npm -w apps/desktop run build",
+    "build:server": "cd apps/server && pyinstaller --onefile main.py",
+    "lint": "eslint . --ext .ts,.vue",
+    "typecheck": "npm -w apps/desktop run typecheck && npm -w packages/shared-types run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vue-eslint-parser": "^9.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "dependencies": {
+    "marked": "^18.0.7"
+  }
+}

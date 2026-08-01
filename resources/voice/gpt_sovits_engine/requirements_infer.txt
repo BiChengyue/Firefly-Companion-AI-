@@ -1,0 +1,45 @@
+# Firefly GPT-SoVITS 推理环境依赖
+# 从 GPT-SOVITS-V4 整合包精简而来，仅保留 api_v2.py 推理所需的包
+# 已移除: gradio (WebUI 不需要)
+
+numpy<2.0
+scipy
+librosa==0.10.2
+numba
+ffmpeg-python
+onnxruntime-gpu
+tqdm
+funasr==1.0.27
+cn2an
+pypinyin
+pyopenjtalk>=0.4.1
+g2p_en
+torchaudio
+modelscope==1.10.0
+sentencepiece
+transformers>=4.43
+peft
+chardet
+PyYAML
+psutil
+jieba_fast
+jieba
+split-lang
+fast_langdetect>=0.3.1
+wordsegment
+rotary_embedding_torch
+ToJyutping
+g2pk2
+ko_pron
+opencc
+fastapi<0.112.2
+x_transformers
+pydantic<=2.10.6
+ctranslate2>=4.0,<5
+huggingface_hub>=0.13
+tokenizers>=0.13,<1
+av>=11
+uvicorn
+pytorch_lightning
+matplotlib
+python-multipart

@@ -1,0 +1,63 @@
+[project]
+name = "firefly-companion-server"
+version = "0.2.0-alpha.53"
+description = "流萤桌面 Live2D AI 伴侣 - Python AI 后端"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",            # 人设 YAML 加载（spec 3.1）
+    "websockets>=12.0",       # WebSocket 支持（spec 阶段1）
+    "numpy>=1.26.0",          # 阶段8 本地向量语义检索 (余弦相似度)
+    # 后续阶段按需启用：
+    "openai>=1.0",            # 阶段1 LLM 适配（已启用）
+    "edge-tts>=6.1.0",        # 阶段7 TTS
+    "httpx>=0.27.0",          # 阶段7 GPT-SoVITS HTTP API 适配
+    "python-multipart>=0.0.12",  # FastAPI 文件上传 (Skill 导入)
+    # Phase 14 ONNX 真语义引擎（可选依赖，hash 引擎无需安装）：
+    "optimum[onnxruntime]>=1.20.0",
+    "transformers>=4.40.0",
+    "sentencepiece>=0.2.0",
+    "protobuf>=4.25.0",
+    # "chromadb>=0.5",        # 阶段3 向量记忆
+    # "faster-whisper>=1.0",  # 阶段7 STT
+    # "playwright>=1.48",     # 阶段4 浏览器自动化
+    # "pyautogui>=0.9.54",    # 阶段4 GUI 操控
+    # "pywinauto>=0.6.8",     # 阶段4 Windows 窗口操控
+    # "Pillow>=11.0",         # 阶段4 截图
+    # "restrictedpython>=7.0",# 阶段4 代码沙箱（spec 3.9.2）
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "respx>=0.21",
+    "httpx>=0.27.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*", "run_tests.py", "scripts/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "def __repr__",
+]

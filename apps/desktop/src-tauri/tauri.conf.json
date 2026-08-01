@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FireflyCompanion",
+  "version": "0.2.0-alpha.54",
+  "identifier": "com.firefly.companion",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "流萤桌面伴侣",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "transparent": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "skipTaskbar": false
+      },
+      {
+        "label": "pet",
+        "title": "流萤桌宠",
+        "width": 220,
+        "height": 340,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "x": 80,
+        "y": 100
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "app", "dmg", "deb", "appimage"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "dmg": {}
+    },
+    "linux": {
+      "deb": {},
+      "appimage": {}
+    }
+  },
+  "plugins": {}
+}

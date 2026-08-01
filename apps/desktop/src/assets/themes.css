@@ -1,0 +1,156 @@
+/* ═══════════════════════════════════════════════════════════════
+   流萤 AI 伴侣 — 双主题 CSS 变量
+   daily → 清新嫩绿治愈系    work → 萨姆装甲红科技风
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 默认：日常模式 */
+#app {
+  /* ── 背景与表面 ── */
+  --bg-root: #eef5f0;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f5f9f7;
+  --bg-elevated: rgba(255, 255, 255, 0.92);
+  --bg-glass: rgba(255, 255, 255, 0.7);
+  --bg-input: #f0f5f2;
+
+  /* ── 边框 ── */
+  --border-main: #e6ede8;
+  --border-subtle: rgba(120, 220, 160, 0.2);
+  --border-accent: rgba(120, 220, 160, 0.4);
+
+  /* ── 文字 ── */
+  --text-primary: #1e2b23;
+  --text-secondary: #5a6b60;
+  --text-muted: #8a9b90;
+  --text-placeholder: #b0c0b5;
+  --text-on-accent: #fff;
+
+  /* ── 强调色（绿） ── */
+  --accent: #5ebd82;
+  --accent-strong: #3da061;
+  --accent-light: rgba(120, 220, 160, 0.18);
+  --accent-glow: rgba(120, 220, 160, 0.3);
+  --accent-neon-glow: rgba(120, 220, 160, 0.6);
+
+  /* ── 聊天气泡 ── */
+  --bubble-user-bg: rgba(94, 189, 130, 0.22);
+  --bubble-user-text: #1a3325;
+  --bubble-assistant-bg: rgba(0, 0, 0, 0.04);
+  --bubble-assistant-text: #2d3a32;
+  --bubble-assistant-border: rgba(120, 220, 160, 0.18);
+
+  /* ── 阴影 ── */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.08);
+
+  /* ── 圆角 / 间距 ── */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 14px;
+  --gap-lg: 20px;
+
+  /* ── 过渡与缓动 ── */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-tactile: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast: 0.15s var(--ease);
+  --transition: 0.3s var(--ease-tactile);
+  --transition-slow: 0.45s var(--ease-tactile);
+}
+
+/* ── 工作模式覆写 ──────────────────────────────────────────── */
+.chat-client-root.work {
+  --bg-root: #0a0301;
+  --bg-surface: rgba(12, 4, 1, 0.96);
+  --bg-surface-hover: rgba(20, 6, 2, 0.96);
+  --bg-elevated: rgba(14, 4, 1, 0.94);
+  --bg-glass: rgba(10, 3, 1, 0.8);
+  --bg-input: rgba(20, 6, 2, 0.7);
+
+  --border-main: rgba(204, 51, 0, 0.2);
+  --border-subtle: rgba(204, 51, 0, 0.12);
+  --border-accent: rgba(255, 68, 0, 0.5);
+
+  --text-primary: #ffaa88;
+  --text-secondary: #cc6644;
+  --text-muted: rgba(204, 102, 68, 0.5);
+  --text-placeholder: rgba(204, 102, 68, 0.3);
+  --text-on-accent: #fff;
+
+  --accent: #cc3300;
+  --accent-strong: #ff4400;
+  --accent-light: rgba(204, 51, 0, 0.2);
+  --accent-glow: rgba(254, 70, 10, 0.4);
+  --accent-neon-glow: rgba(255, 68, 0, 0.75);
+
+  --bubble-user-bg: rgba(204, 51, 0, 0.2);
+  --bubble-user-text: #ffbb99;
+  --bubble-assistant-bg: rgba(35, 5, 0, 0.85);
+  --bubble-assistant-text: #ffaa88;
+  --bubble-assistant-border: rgba(204, 51, 0, 0.3);
+
+  --shadow-sm: 0 1px 6px rgba(204, 51, 0, 0.12);
+  --shadow-md: 0 4px 16px rgba(204, 51, 0, 0.2);
+  --shadow-lg: 0 8px 30px rgba(204, 51, 0, 0.3);
+
+  /* 战术装甲模式下的紧凑微圆角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   双模式差异化拉条系统 (Dual-Theme Custom Scrollbar System)
+   使得 ChatPanel, RightPanel, LeftSidebar, SamHUD, Reminders,
+   TaskWidget 等全量容器在日常与工作模式下呈现出不同审美契合度的拉条
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 1. 日常模式：清新治愈系 (柔和胶囊圆角 5px) ── */
+#app *::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+#app *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#app *::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 4px;
+  transition: background var(--transition-fast);
+}
+
+#app *::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* ── 2. 工作模式：萨姆战术装甲风 (4px 紧凑线条 + 全息描边 + 熔融等离子 Neon Glow) ── */
+.chat-client-root.work *::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.chat-client-root.work *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-client-root.work *::-webkit-scrollbar-thumb {
+  background: rgba(204, 51, 0, 0.45);
+  border: 1px solid rgba(255, 68, 0, 0.35);
+  border-radius: 1px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chat-client-root.work *::-webkit-scrollbar-thumb:hover {
+  background: #ff4400;
+  border-color: #ffaa88;
+  box-shadow: 0 0 8px rgba(255, 68, 0, 0.85);
+}
+
+
+

@@ -1,0 +1,47 @@
+# 依赖
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# 构建产物
+dist/
+target/
+apps/desktop/src-tauri/target/
+
+# 运行时数据（向量库/对话/日志）
+data/
+server.log
+
+# 本地配置（含密钥，不要提交）
+config/*.local.json
+config/default.json
+.env
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# 个人开发文档 (不提交)
+开发思路.md
+
+# 流萤专属权重 (走 Git LFS 提交，克隆后自动下载，无需忽略)
+# *.ckpt 和 *.pth 已在 .gitattributes 中设为 LFS 追踪
+
+# 参考音频：小文件，直接提交
+# resources/voice/firefly/ref_audio/ 不忽略
+
+# 自动下载的公开基础模型目录（体积过大，运行时自动补全）
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/
+resources/voice/gpt_sovits_engine/GPT_weights_v4/
+resources/voice/gpt_sovits_engine/SoVITS_weights_v4/
+
+# 语音合成缓存与引擎运行日志
+data/audio_cache/
+resources/voice/gpt_sovits_engine/logs/
+resources/voice/gpt_sovits_engine/*.log
+
+# Python 虚拟环境（运行时创建，不纳入版本库）
+resources/voice/gpt_sovits_engine/env/
+

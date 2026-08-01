@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Create small per-category trial shards for BWiki image vision annotation."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+ASSETS_WEBP = ROOT / "references" / "bwiki_images" / "assets_webp"
+JOBS_DIR = ROOT / "references" / "bwiki_images" / "vision_jobs"
+
+
+def rel(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix()
+
+
+def write_jsonl(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
+
+
+def build_records(limit_per_category: int | None, categories: set[str] | None) -> list[dict]:
+    records: list[dict] = []
+    for category_dir in sorted(ASSETS_WEBP.iterdir(), key=lambda p: p.name):
+        if not category_dir.is_dir():
+            continue
+        if categories is not None and category_dir.name not in categories:
+            continue
+        images = sorted(category_dir.glob("*.webp"), key=lambda p: p.name)
+        selected = images if limit_per_category is None else images[:limit_per_category]
+        for image in selected:
+            records.append(
+                {
+                    "图片路径": rel(image),
+                    "图片类别": category_dir.name,
+                    "图片标题": image.stem,
+                }
+            )
+    return records
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit-per-category", type=int, default=10)
+    parser.add_argument("--shard-size", type=int, default=13)
+    parser.add_argument("--prefix", default="trial")
+    parser.add_argument("--category", action="append", help="Only include this image category. Can be repeated.")
+    parser.add_argument("--all", action="store_true", help="Include all images from selected categories.")
+    args = parser.parse_args()
+
+    limit = None if args.all else args.limit_per_category
+    categories = set(args.category) if args.category else None
+    records = build_records(limit, categories)
+    manifest = JOBS_DIR / f"{args.prefix}_manifest.jsonl"
+    write_jsonl(manifest, records)
+
+    shard_dir = JOBS_DIR / "shards"
+    for old in shard_dir.glob(f"{args.prefix}_*.jsonl"):
+        old.unlink()
+
+    shards = []
+    for index in range(0, len(records), args.shard_size):
+        shard_index = index // args.shard_size
+        shard_records = records[index : index + args.shard_size]
+        shard_path = shard_dir / f"{args.prefix}_{shard_index:03d}.jsonl"
+        write_jsonl(shard_path, shard_records)
+        shards.append(shard_path)
+
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record["图片类别"]] = counts.get(record["图片类别"], 0) + 1
+
+    summary = {
+        "manifest": rel(manifest),
+        "total": len(records),
+        "limit_per_category": limit,
+        "shard_size": args.shard_size,
+        "shards": [rel(path) for path in shards],
+        "counts": dict(sorted(counts.items())),
+    }
+    summary_path = JOBS_DIR / f"{args.prefix}_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
