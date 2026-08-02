@@ -1,20 +1,31 @@
 /** 后端 HTTP API 封装 */
 import type { AppMode, ModeConfig, HealthResponse, SessionInfo, MemoryItem, MemoryType } from '@shared/index'
 
+const DEFAULT_HTTP_BASE = 'http://127.0.0.1:8765'
+
 function getBaseHttp(): string {
   try {
-    // ⚠️ Vite dev 模式必须优先判断，否则 localStorage 中已保存的旧配置
-    // (settings.ts 会把 'http://127.0.0.1:8765' 写入 firefly_http_base) 会覆盖本逻辑。
-    // dev 模式返回空字符串 → fetch 走相对路径 → Vite proxy 转发 → 无 CORS。
-    if (typeof window !== 'undefined' && window.location.protocol === 'http:') {
-      return ''
-    }
-    // Tauri 生产模式 (tauri://)：从 localStorage 读取用户配置或使用默认值
+    if (typeof window === 'undefined') return DEFAULT_HTTP_BASE
+    const { protocol, hostname } = window.location
+
+    // ⚠️ 打包后的 Tauri webview 源并不是 tauri:// —— 在 Windows(WebView2) 上是
+    // http://tauri.localhost（启用 useHttpsScheme 时为 https://tauri.localhost），
+    // 只有 macOS/Linux 才是 tauri://localhost。因此绝不能只用 protocol === 'http:'
+    // 判断 dev，否则打包版会被误判为 dev 而走相对路径，把请求打到
+    // http://tauri.localhost/api/... （Tauri 静态资源处理器）→ 全部 404。
+    const isTauriBundle = protocol === 'tauri:' || hostname === 'tauri.localhost'
+
+    // Vite dev server (http://127.0.0.1:5173)：返回空字符串 → fetch 走相对路径
+    // → Vite proxy 转发 → 无 CORS。同时避免被 localStorage 中的旧配置覆盖
+    // (settings.ts 会把 firefly_http_base 写入 localStorage)。
+    if (!isTauriBundle) return ''
+
+    // Tauri 生产模式：从 localStorage 读取用户配置或使用默认值
     const raw = localStorage.getItem('firefly_http_base')
     if (raw) return raw
-    return 'http://127.0.0.1:8765'
+    return DEFAULT_HTTP_BASE
   } catch {
-    return 'http://127.0.0.1:8765'
+    return DEFAULT_HTTP_BASE
   }
 }
 

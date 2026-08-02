@@ -74,18 +74,19 @@ const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
           <button class="model-refresh-btn" :disabled="form.modelStatusLoading.value" @click="form.checkModelStatus()">{{ form.modelStatusLoading.value ? '检测中…' : '🔄 重新检测' }}</button>
         </div>
         <div v-if="form.modelStatus.value" class="model-status-overview">
-          <div :class="['model-status-badge', form.modelStatus.value.engine_ready ? 'ready' : 'missing']">{{ form.modelStatus.value.engine_ready ? '✅ 引擎就绪' : `⚠️ 缺少 ${form.modelStatus.value.missing_files} 个文件` }}</div>
-          <span class="model-status-detail">{{ form.modelStatus.value.present_files }} / {{ form.modelStatus.value.total_files }} 个文件已就绪<template v-if="!form.modelStatus.value.engine_ready && form.modelStatus.value.download_size_mb > 0"> · 还需下载约 {{ Math.round(form.modelStatus.value.download_size_mb / 1024 * 10) / 10 }} GB</template></span>
+          <div :class="['model-status-badge', form.modelStatus.value.engine_ready ? 'ready' : 'missing']">
+            {{ form.modelStatus.value.engine_ready ? '✅ 引擎就绪' : '⚠️ 基础模型未下载' }}
+          </div>
+          <span class="model-status-detail">
+            <template v-if="form.modelStatus.value.engine_ready">
+              pretrained_models / text 目录已完整
+            </template>
+            <template v-else>
+              请点击下方按钮下载 pretrained_models 和 text 目录
+            </template>
+          </span>
         </div>
         <div v-else-if="form.modelStatusLoading.value" class="model-status-loading">正在检测文件状态…</div>
-        <div v-if="form.modelStatus.value" class="model-file-list">
-          <div v-for="f in form.modelStatus.value.files" :key="f.local_path" class="model-file-row">
-            <span :class="['model-file-dot', f.exists ? 'exist' : 'miss']"></span>
-            <span class="model-file-name">{{ f.name }}</span>
-            <span v-if="f.bundled" class="model-file-tag bundled">仓库内置</span>
-            <span class="model-file-size">{{ f.exists ? `${Math.round((f.file_size_mb ?? f.size_mb) * 10) / 10} MB` : `~${f.size_mb} MB` }}</span>
-          </div>
-        </div>
         <div v-if="form.modelDownloading.value" class="model-download-progress">
           <div class="progress-label"><span>{{ form.downloadProgress.value.current_file }}</span><span>{{ form.downloadProgress.value.overall_percent }}%</span></div>
           <div class="progress-bar-wrap"><div class="progress-bar-fill" :style="{ width: form.downloadProgress.value.overall_percent + '%' }"></div></div>
@@ -95,10 +96,10 @@ const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
           <p v-for="(line, i) in form.downloadLog.value" :key="i" class="log-line">{{ line }}</p>
         </div>
         <div class="model-card-actions">
-          <button class="model-download-btn" :disabled="form.modelDownloading.value || (form.modelStatus.value?.engine_ready ?? false)" @click="form.startModelDownload()">
+          <button class="model-download-btn" :disabled="form.modelDownloading.value" @click="form.startModelDownload()">
             <template v-if="form.modelDownloading.value">⏳ 下载中，请勿关闭…</template>
             <template v-else-if="form.modelStatus.value?.engine_ready">✅ 模型已完整，无需下载</template>
-            <template v-else>⬇️ 下载缺失的基础模型（约 {{ Math.round((form.modelStatus.value?.download_size_mb ?? 1821) / 1024 * 10) / 10 }} GB）</template>
+            <template v-else>⬇️ 下载缺失的基础模型</template>
           </button>
         </div>
         <p class="diag-desc" style="margin-top: 4px;">国内用户推荐使用 HF-Mirror 加速源，下载时请保持应用运行。已下载文件支持断点续传。</p>

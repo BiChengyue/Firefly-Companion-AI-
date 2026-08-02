@@ -32,8 +32,13 @@ config/default.json
 # 参考音频：小文件，直接提交
 # resources/voice/firefly/ref_audio/ 不忽略
 
-# 自动下载的公开基础模型目录（体积过大，运行时自动补全）
-resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/
+# pretrained_models 大权重文件（通过下载按钮获取，不纳入版本库）
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/s1v3.ckpt
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/chinese-hubert-base/pytorch_model.bin
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large/pytorch_model.bin
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/fast_langdetect/lid.176.bin
+resources/voice/gpt_sovits_engine/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x/
 resources/voice/gpt_sovits_engine/GPT_weights_v4/
 resources/voice/gpt_sovits_engine/SoVITS_weights_v4/
 

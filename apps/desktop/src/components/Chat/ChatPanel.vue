@@ -10,7 +10,7 @@ const companion = useCompanionStore()
 const scrollRef = ref<HTMLElement | null>(null)
 const inputBarRef = ref<InstanceType<typeof InputBar> | null>(null)
 const showSkillPicker = ref(false)
-const emit = defineEmits<{ help: [] }>()
+const emit = defineEmits<{ }>()
 
 /** 将流式文本包装为 ChatMessage 对象，复用 MessageBubble 的完整渲染（头像+泡泡+Markdown）。 */
 const streamingMsg = computed<ChatMessage | null>(() => {
@@ -88,7 +88,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           @close="closeSkillPicker"
         />
       </Transition>
-      <InputBar ref="inputBarRef" @help="emit('help')" @toggle-skill-picker="toggleSkillPicker" />
+      <InputBar ref="inputBarRef" @toggle-skill-picker="toggleSkillPicker" />
     </div>
   </div>
 </template>

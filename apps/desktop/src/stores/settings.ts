@@ -104,9 +104,6 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  // ── 引导 ───────────────────────────────────────────
-  const guideShown = ref(loadBool('firefly_guide_shown', false))
-
   // ── 持久化工具 ─────────────────────────────────────
   function loadStr(key: string, fallback: string): string {
     return localStorage.getItem(key) ?? fallback
@@ -129,15 +126,6 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // ── Actions ────────────────────────────────────────
-  function markGuideShown() {
-    guideShown.value = true
-    localStorage.setItem('firefly_guide_shown', 'true')
-  }
-
-  function loadGuideState() {
-    guideShown.value = localStorage.getItem('firefly_guide_shown') === 'true'
-  }
-
   function saveAllSettings(settings: {
     llmProvider?: string
     llmModel?: string
@@ -256,9 +244,6 @@ export const useSettingsStore = defineStore('settings', () => {
     minimaxApiKey,
     minimaxVoiceId,
     autoPlayVoice,
-    guideShown,
-    markGuideShown,
-    loadGuideState,
     saveAllSettings,
     settingsChanged,
     dailyUnlocked,

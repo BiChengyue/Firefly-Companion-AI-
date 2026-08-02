@@ -56,13 +56,6 @@ function send(e?: Event) {
 
   const content = text.value.trim()
   if (!content) return
-  if (content === '/help') {
-    emit('help')
-    text.value = ''
-    nextTick(autoResize)
-    return
-  }
-
   // 检查连接状态，未连接时给出本地提示
   if (!companion.wsConnected) {
     companion.setError('未连接到服务端，请确认后端服务已启动（端口 8765）')

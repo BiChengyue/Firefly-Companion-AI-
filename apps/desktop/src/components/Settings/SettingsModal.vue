@@ -138,7 +138,7 @@ function handleCancel() {
 .tab-btn.active { color: var(--accent, #2ecc71); border-bottom-color: var(--accent, #2ecc71); }
 
 /* 内容区 */
-.tab-content { flex: 1; overflow-y: auto; padding: 12px 18px; }
+.tab-content { flex: 1; overflow-y: auto; padding: 12px 18px; scrollbar-gutter: stable; }
 
 /* 底部 */
 .modal-footer {

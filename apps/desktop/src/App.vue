@@ -8,7 +8,6 @@ import { wsClient } from '@/services/ws'
 import { getMode } from '@/services/api'
 import { useCtrlOverride } from '@/composables/useCtrlOverride'
 import { useWsHandler } from '@/composables/useWsHandler'
-import GuideCenter from '@/components/Common/GuideCenter.vue'
 import ErrorBoundary from '@/components/Common/ErrorBoundary.vue'
 import ChatPanel from '@/components/Chat/ChatPanel.vue'
 import SamHudPanel from '@/components/SamHUD/SamHudPanel.vue'
@@ -33,7 +32,7 @@ const Live2DPet = defineAsyncComponent({
 
 const companion = useCompanionStore()
 const settings = useSettingsStore()
-const guideRef = ref<InstanceType<typeof GuideCenter> | null>(null)
+
 const canvasRef = ref<InstanceType<typeof ModeTransitionCanvas> | null>(null)
 
 const { executeTransition } = useThemeTransition()
@@ -97,7 +96,6 @@ if (currentWindow.label === 'pet') {
 
   onMounted(async () => {
     windowLabel.value = currentWindow.label
-    settings.loadGuideState()
 
     // 监听全局模式切换请求（带有点击坐标）
     window.addEventListener('trigger-mode-switch', (e: Event) => {
@@ -153,10 +151,6 @@ if (currentWindow.label === 'pet') {
         getMode().then(m => companion.applyModeConfig(m)).catch(() => {}),
         companion.loadAvatars(),
       ])
-
-      if (!settings.guideShown) {
-        guideRef.value?.show()
-      }
     } else if (currentWindow.label === 'pet') {
       listen('pet-lock-changed', (event: { payload: { locked: boolean } }) => {
         companion.setPetLocked(event.payload.locked)
@@ -177,10 +171,6 @@ watch(() => companion.voiceEnabled, (enabled) => {
     }
   }
 })
-
-function handleHelp() {
-  guideRef.value?.show()
-}
 </script>
 
 <template>
@@ -202,7 +192,7 @@ function handleHelp() {
         <div class="bg-layer" :style="{ backgroundImage: bgImage }" />
         <TopBar />
         <div class="chat-container">
-          <ChatPanel @help="handleHelp" />
+          <ChatPanel />
         </div>
         <SamHudPanel />
       </div>
@@ -211,8 +201,6 @@ function handleHelp() {
     <ErrorBoundary>
       <RightPanel />
     </ErrorBoundary>
-
-    <GuideCenter ref="guideRef" />
     <ApprovalDialog />
 
     <!-- 💥 高能 60FPS 变身特效 Canvas -->

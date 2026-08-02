@@ -124,6 +124,17 @@ app.add_middleware(
 )
 
 
+# ── 私有网络访问(PNA)兼容头 ──
+# 打包后的 Tauri webview 源为 http://tauri.localhost，向本地回环地址 127.0.0.1 发起
+# 请求时，Chromium 的 Private Network Access 策略可能要求响应带该头，否则预检失败。
+# 这里统一补上作为兼容兜底（对普通浏览器无副作用）。
+@app.middleware("http")
+async def add_private_network_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
+
 # ── 全局异常处理器：将真正的错误信息返回给前端，便于排查 500 ──
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

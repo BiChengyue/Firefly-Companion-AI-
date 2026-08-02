@@ -2,18 +2,22 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
+set ENGINE_DIR=%~dp0
+set ENV_DIR=%ENGINE_DIR%env
+
 echo.
-echo ╔══════════════════════════════════════════════╗
-echo ║   Firefly 流萤 GPT-SoVITS 语音引擎一键安装  ║
-echo ╚══════════════════════════════════════════════╝
+echo ================================================
+echo    Firefly GPT-SoVITS 语音引擎一键安装
+echo ================================================
 echo.
 echo 本脚本将在 engine\env\ 下创建 Python 虚拟环境
 echo 并安装 GPU 推理所需的所有依赖（约 3-5 GB）
 echo 请确保网络畅通，预计耗时 10-20 分钟
 echo.
 
-set ENGINE_DIR=%~dp0
-set ENV_DIR=%ENGINE_DIR%env
+:: 修复 Windows GBK 编码下读取 UTF-8 文件导致 pip install -r 失败的问题
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 
 :: ── 1. 检查 Python ──
 echo [1/4] 检查系统 Python ...
@@ -83,13 +87,13 @@ if %errorlevel% neq 0 (
 
 :: ── 完成 ──
 echo.
-echo ╔══════════════════════════════════════════════╗
-echo ║             ✅  安装完成！                    ║
-echo ╠══════════════════════════════════════════════╣
-echo ║  环境路径: %ENV_DIR%                        ║
-echo ║  Python  : %ENV_DIR%\Scripts\python.exe      ║
-echo ║                                                ║
-echo ║  重启应用后自动检测，无需手动配置             ║
-echo ╚══════════════════════════════════════════════╝
+echo ================================================
+echo              !  安装完成！
+echo ================================================
+echo   环境路径: %ENV_DIR%
+echo   Python  : %ENV_DIR%\Scripts\python.exe
+echo.
+echo   重启应用后自动检测，无需手动配置
+echo ================================================
 echo.
 pause
