@@ -253,8 +253,8 @@ async def plan_task(
         if json_str:
             data = _parse_json_robust(json_str)
             if data:
-                raw_steps = data.get("steps", [])
-                if isinstance(raw_steps, list) and raw_steps:
+                raw_steps = _normalize_steps(data)
+                if raw_steps:
                     return raw_steps, text, content_blocks
                 else:
                     logger.warning("JSON 解析成功但 steps 为空/非列表: %s", json_str[:300])
@@ -270,8 +270,38 @@ async def plan_task(
     return [], "（规划失败，将直接回复用户）", {}
 
 
-def _parse_json_robust(json_str: str) -> Optional[dict]:
-    """带有软修正功能的 JSON 解析器：自动修复单反斜杠、控制字符与 URL 转义瑕疵。"""
+def _normalize_steps(data) -> list[dict]:
+    """将 LLM 返回的 JSON 结构归一化为标准的 steps 列表。
+
+    LLM 经常不按格式输出，常见 3 种形态都需要归一化：
+    1. {"steps": [...]}  —— 标准形态
+    2. {...单步对象...}  —— 顶层直接是单个 step（含 action 字段）
+    3. [{...}, {...}]    —— 顶层直接是 steps 数组
+    """
+    if not data:
+        return []
+    # 形态 1：标准 {"steps": [...]}
+    if isinstance(data, dict):
+        raw = data.get("steps")
+        if isinstance(raw, list) and raw:
+            return raw
+        # 形态 2：顶层是单个 step 对象（含 action 字段）
+        if "action" in data and isinstance(data.get("action"), str):
+            return [data]
+    # 形态 3：顶层是 steps 数组
+    if isinstance(data, list) and data:
+        # 过滤掉非 dict 或缺少 action 的无效元素，但保留格式正确元素
+        steps = [s for s in data if isinstance(s, dict) and "action" in s]
+        if steps:
+            return steps
+    return []
+
+
+def _parse_json_robust(json_str: str):
+    """带有软修正功能的 JSON 解析器：自动修复单反斜杠、控制字符与 URL 转义瑕疵。
+
+    返回类型可能为 dict（{"steps": [...]} 或裸 step）或 list（裸 steps 数组）。
+    """
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
@@ -293,20 +323,25 @@ def _parse_json_robust(json_str: str) -> Optional[dict]:
 
 
 def _extract_json(text: str) -> Optional[str]:
-    """从 LLM 输出提取 JSON。支持三种格式：纯 JSON、``` 代码块、混合文本。
+    """从 LLM 输出提取 JSON。支持四种格式：纯 JSON、``` 代码块、混合文本、裸数组。
 
-    最后一种用平衡括号法提取：从第一个 `{` 开始计括号深度，
+    混合文本用平衡括号法提取：从第一个 `{` 或 `[` 开始计括号深度，
     深=0 时即为 JSON 结束位置，防止 USAGE/注释等后缀被吞入。
     """
     text = text.strip()
-    if text.startswith("{") and text.endswith("}"):
+    if (text.startswith("{") and text.endswith("}")) or (text.startswith("[") and text.endswith("]")):
         return text
-    # 1. 尝试代码块格式
-    m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    # 1. 尝试代码块格式（同时匹配对象与数组）
+    m = re.search(r"```(?:json)?\s*([\[{][\s\S]*?[\]}])\s*```", text)
     if m:
         return m.group(1)
-    # 2. 平衡括号法：从第一个 { 开始，深度归零时截断
-    start = text.find("{")
+    # 2. 平衡括号法：从第一个 { 或 [ 开始，深度归零时截断
+    open_char = None
+    close_char = None
+    start = -1
+    for _start, _open, _close in ((text.find("{"), "{", "}"), (text.find("["), "[", "]")):
+        if _start != -1 and (start == -1 or _start < start):
+            start, open_char, close_char = _start, _open, _close
     if start == -1:
         return None
     depth = 0
@@ -324,9 +359,9 @@ def _extract_json(text: str) -> Optional[str]:
             continue
         if in_string:
             continue
-        if ch == "{":
+        if ch == open_char:
             depth += 1
-        elif ch == "}":
+        elif ch == close_char:
             depth -= 1
             if depth == 0:
                 return text[start:i + 1]

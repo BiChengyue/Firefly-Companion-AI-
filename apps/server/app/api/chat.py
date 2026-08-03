@@ -22,6 +22,7 @@ from app.core.persona.builder import build_system_prompt, build_authors_note
 from app.core.persona.loader import load_persona
 from app.core.hsr_lore import involves_game_lore
 from app.core.logging_config import get_logger
+from app.core.tools.builtin.core_tools import web_search
 
 logger = get_logger("api.chat")
 
@@ -319,6 +320,18 @@ def _is_clear_task(text: str) -> bool:
     if any(v in text_lower for v in _PAST_MARKERS):
         return False
     return True
+
+
+# 搜索/新闻类查询关键词（用于快速通道，绕过 Agent planner）
+_SEARCH_KEYWORDS = ("搜索", "搜一下", "搜一搜", "查一下", "查查", "帮我查",
+                    "上网搜", "今天新闻", "最新新闻", "今日新闻", "发生了什么事",
+                    "新闻", "资讯", "热点", "头条", "今天发生", "最新发生")
+
+
+def _is_search_query(text: str) -> bool:
+    """判断是否为搜索/新闻类简单信息查询（不走 Agent，走快速通道）。"""
+    t = text.lower()
+    return any(k in t for k in _SEARCH_KEYWORDS)
 
 
 async def _classify_intent(provider, text: str) -> str:
@@ -947,6 +960,7 @@ async def chat_ws(ws: WebSocket):
                             memory_manager, provider, history[-6:], mode, ws, source="agent"
                         )
                         continue
+
 
                     # 普通 LLM 流式生成
                     full_content: list[str] = []

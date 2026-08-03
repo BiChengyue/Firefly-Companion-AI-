@@ -210,8 +210,8 @@ async def serve_voice_file(filename: str):
         media_type = "audio/wav" if actual_file.suffix == ".wav" else "audio/mpeg"
         return FileResponse(actual_file, media_type=media_type)
 
-    # 文件尚未生成 → 等待最多 30 秒（TTS 生成中，长文本推理可能较慢）
-    for _ in range(300):
+    # 文件尚未生成 → 等待最多 180 秒（GPT-SoVITS 冷启动 + 长文本推理可能较慢）
+    for _ in range(1800):
         await asyncio.sleep(0.1)
         actual_file = find_actual_file()
         if actual_file:

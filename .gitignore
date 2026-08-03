@@ -50,3 +50,21 @@ resources/voice/gpt_sovits_engine/*.log
 # Python 虚拟环境（运行时创建，不纳入版本库）
 resources/voice/gpt_sovits_engine/env/
 
+# 运行时日志 / 数据库 / 构建产物（不提交）
+*.log
+backend_err.log
+backend_out.log
+subagent_test_output.log
+scratch_decay_test.db
+scratch_weekly_decay_test.db
+test_mem.db
+firefly-companion-desktop.exe
+apps/build_rust.log
+apps/desktop/tsconfig.*.tsbuildinfo
+apps/desktop/vite.config.js
+apps/desktop/vite.config.d.ts
+resources/voice/gpt_sovits_engine/bin/
+
+# Agent 工作区 / 临时研究产物（不提交）
+agent_workspace/
+

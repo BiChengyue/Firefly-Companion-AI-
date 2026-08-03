@@ -1,0 +1,13 @@
+{
+  "llm": {
+    "apiKey": "test-key-not-real"
+  },
+  "proactiveChat": {
+    "enabled": false
+  },
+  "voice": {
+    "tts": {
+      "engine": "none"
+    }
+  }
+}

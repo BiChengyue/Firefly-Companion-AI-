@@ -287,16 +287,8 @@ def kill_process_on_port(port: int = 9880):
 
 
 def mark_gpt_sovits_active():
-    """标记 GPT-SoVITS 刚被使用，重置空闲计时器。
-
-    每次成功调用 GPT-SoVITS TTS 后都应调用此函数，
-    确保空闲计时器重新开始计时，避免正在使用时被自动关闭。
-    """
-    global _idle_timer
-    cancel_gpt_sovits_idle_timer()
-    _idle_timer = threading.Timer(IDLE_SHUTDOWN_SECONDS, _on_idle_timeout)
-    _idle_timer.daemon = True
-    _idle_timer.start()
+    """标记 GPT-SoVITS 刚被使用。（空闲自动关闭已禁用，引擎常驻不回收。）"""
+    pass
 
 
 def cancel_gpt_sovits_idle_timer():

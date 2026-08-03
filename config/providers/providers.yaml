@@ -1,0 +1,105 @@
+# LLM Provider 预设模板 — 前端设置页自动发现。
+# 每模型包含默认 maxTokens / temperature，用户可手动覆盖。
+# 所有供应商均通过 OpenAI-compatible 接口接入，无需分别实现。
+
+providers:
+  deepseek:
+    name: DeepSeek
+    baseUrl: "https://api.deepseek.com/v1"
+    models:
+      - { id: deepseek-v4-pro, name: DeepSeek-V4-Pro, maxTokens: 384000 }
+      - { id: deepseek-v4-flash, name: DeepSeek-V4-Flash, maxTokens: 384000 }
+    apiKeyEnv: "DEEPSEEK_API_KEY"
+    temperature: 0.8
+    enableThinking: true
+
+  openai:
+    name: OpenAI
+    baseUrl: "https://api.openai.com/v1"
+    models:
+      - id: gpt-4o
+        name: GPT-4o
+        maxTokens: 16384
+      - id: gpt-4o-mini
+        name: GPT-4o Mini
+        maxTokens: 8192
+      - id: gpt-4-turbo
+        name: GPT-4 Turbo
+        maxTokens: 4096
+    apiKeyEnv: "OPENAI_API_KEY"
+    temperature: 0.8
+    enableThinking: false
+
+  anthropic:
+    name: Anthropic Claude
+    baseUrl: "https://api.anthropic.com/v1"
+    models:
+      - id: claude-3-5-sonnet-20241022
+        name: Claude 3.5 Sonnet
+        maxTokens: 8192
+      - id: claude-3-5-haiku-20241022
+        name: Claude 3.5 Haiku
+        maxTokens: 4096
+    apiKeyEnv: "ANTHROPIC_API_KEY"
+    temperature: 0.8
+    enableThinking: false
+
+  zhipu:
+    name: 智谱 GLM
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4"
+    models:
+      # ── 旗舰系列 (GLM-5) ──
+      - { id: glm-5.2, name: GLM-5.2, maxTokens: 131072 }
+      - { id: glm-5.1, name: GLM-5.1, maxTokens: 131072 }
+      - { id: glm-5, name: GLM-5, maxTokens: 131072 }
+      - { id: glm-5-turbo, name: GLM-5-Turbo, maxTokens: 131072 }
+      # ── 高性能系列 ──
+      - { id: glm-4.7, name: GLM-4.7, maxTokens: 131072 }
+      - { id: glm-4.7-flashx, name: GLM-4.7-FlashX, maxTokens: 131072 }
+      - { id: glm-4.6, name: GLM-4.6, maxTokens: 131072 }
+      - { id: glm-4.5-air, name: GLM-4.5-Air, maxTokens: 98304 }
+      - { id: glm-4.5-airx, name: GLM-4.5-AirX, maxTokens: 98304 }
+      # ── 视觉模型 ──
+      - { id: glm-5v-turbo, name: GLM-5V-Turbo, maxTokens: 131072 }
+      - { id: glm-4.6v, name: GLM-4.6V, maxTokens: 32768 }
+      - { id: glm-4.6v-flash, name: GLM-4.6V-Flash, maxTokens: 32768 }
+      - { id: glm-4.1v-thinking-flashx, name: GLM-4.1V-Thinking-FlashX, maxTokens: 16384 }
+      - { id: glm-4.1v-thinking-flash, name: GLM-4.1V-Thinking-Flash, maxTokens: 16384 }
+      - { id: glm-4v-flash, name: GLM-4V-Flash, maxTokens: 1024 }
+      # ── 轻量系列 ──
+      - { id: glm-4.7-flash, name: GLM-4.7-Flash, maxTokens: 131072 }
+      - { id: glm-4-flash-250414, name: GLM-4-Flash-250414, maxTokens: 16384 }
+      # ── 经典系列 ──
+      - { id: glm-4-plus, name: GLM-4 Plus, maxTokens: 4096 }
+      - { id: glm-4-flash, name: GLM-4 Flash, maxTokens: 4096 }
+    apiKeyEnv: "ZHIPU_API_KEY"
+    temperature: 0.8
+    enableThinking: true
+
+  qwen:
+    name: 通义千问
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    models:
+      - { id: qwen3.7-max, name: Qwen3.7-Max, maxTokens: 65530 }
+      - { id: qwen3.7-plus, name: Qwen3.7-Plus, maxTokens: 65530 }
+      - { id: qwen3.7-flash, name: Qwen3.7-Flash, maxTokens: 65530 }
+      # 旧版
+      - { id: qwen-plus, name: Qwen Plus (旧版), maxTokens: 8192 }
+      - { id: qwen-turbo, name: Qwen Turbo (旧版), maxTokens: 4096 }
+    apiKeyEnv: "DASHSCOPE_API_KEY"
+    temperature: 0.8
+    enableThinking: false
+
+  ollama:
+    name: Ollama (本地)
+    baseUrl: "http://localhost:11434/v1"
+    models:
+      - id: qwen2.5:7b
+        name: Qwen 2.5 7B
+        maxTokens: 4096
+      - id: llama3.1:8b
+        name: Llama 3.1 8B
+        maxTokens: 4096
+    apiKey: "ollama"
+    temperature: 0.8
+    enableThinking: false

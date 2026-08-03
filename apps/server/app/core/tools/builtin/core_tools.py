@@ -573,7 +573,22 @@ def _set_search_cache(cache_key: str, content: str) -> None:
 _JS_RESIDUE_MARKS = ("'+arr", "{{", "undefined", "function(", "arrTaidu", "javascript:", "null")
 
 
-def _is_quality_search_result(formatted: str) -> bool:
+# 与"今日新闻/具体新闻"查询无关的泛结果域名/主题（黄历/百科/天气等，新闻查询应跳过）
+_IRRELEVANT_FOR_NEWS_MARKS = (
+    "huangli", "黄历", "老黄历", "万年历", "宜忌", "宜 ",
+    "baike.baidu.com", "百度百科", "百科",
+    "tianqi", "天气", "天气预报",
+    "英文简称", "历史上的今天", "yyxw", "天天黄历",
+)
+
+
+def _is_news_irrelevant(formatted: str) -> bool:
+    """判断格式化结果是否主要是与新闻无关的泛查询结果（黄历/百科/天气）。"""
+    low = formatted.lower()
+    return any(m in low for m in _IRRELEVANT_FOR_NEWS_MARKS)
+
+
+def _is_quality_search_result(formatted: str, is_news: bool = False) -> bool:
     """搜索结果质量校验：垃圾/残次结果不落 24h 缓存，避免污染被长期固化。"""
     if not formatted or "未找到与" in formatted:
         return False
@@ -582,6 +597,9 @@ def _is_quality_search_result(formatted: str) -> bool:
         return False
     low = formatted.lower()
     if any(mark in low for mark in _JS_RESIDUE_MARKS):
+        return False
+    # 新闻查询：返回黄历/百科/天气等无关结果时，视为低质，不落缓存
+    if is_news and _is_news_irrelevant(formatted):
         return False
     return True
 
@@ -614,7 +632,7 @@ def _is_quality_fetch_result(content: str) -> bool:
 def web_search(query: str, max_results: int = 5) -> str:
     """搜索引擎：
     1. 查询 SQLite 独立 search_cache 缓存 (24h)
-    2. 百度移动/网页版（带多线程解密跟进重定向外链）
+    2. 并行抓取 Bing/百度PC/百度移动 → 合并去重
     3. DuckDuckGo / Jina 降级
     4. 拆词重试
     """
@@ -623,27 +641,50 @@ def web_search(query: str, max_results: int = 5) -> str:
         return "搜索关键词不能为空"
     query = query.strip()
     max_r = min(max_results, 10)
-    cache_key = f"search:{query}:{max_r}"
+    # 新闻类查询走增强缓存，避免与未增强的旧缓存冲突（24h 内可能既有未增强的坏结果）
+    is_news = _is_news_query(query)
+    cache_key = f"search:{query}:{max_r}{':news' if is_news else ''}"
 
     cached = _get_search_cache(cache_key)
     if cached:
         return cached
 
-    # ── 1. 百度多线程搜索与密文解密 ──
-    try:
-        results = _search_baidu(query, max_r)
-        if results:
-            formatted = _format_results(results)
-            if _is_quality_search_result(formatted):
+    # ── 1. 多源搜索：并行抓取 Bing国内 / 百度PC / 百度移动 → 合并去重 ──
+    search_sources = [
+        ("bing", _search_bing),
+        ("baidu_pc", _search_baidu),
+        ("baidu_mobile", _search_baidu_mobile),
+    ]
+    from concurrent.futures import ThreadPoolExecutor
+    source_results: dict[str, list[dict]] = {}
+    with ThreadPoolExecutor(max_workers=3) as _ex:
+        _futures = {_ex.submit(_src_fn, query, max_r): _name for _name, _src_fn in search_sources}
+        for _fut in _futures:
+            _name = _futures[_fut]
+            try:
+                _res = _fut.result()
+                if _res:
+                    source_results[_name] = _res
+            except Exception:
+                pass
+
+    if source_results:
+        merged = _merge_search_results(source_results, limit=max_r)
+        if is_news:
+            try:
+                merged = _enhance_news_results(query, merged, max_r)
+            except Exception:
+                pass
+        formatted = _format_results(merged)
+        if not (is_news and _is_news_irrelevant(formatted)):
+            if _is_quality_search_result(formatted, is_news):
                 _set_search_cache(cache_key, formatted)
             return formatted
-    except Exception:
-        pass
 
-    # ── 2. DuckDuckGo ──
+    # ── 2. DuckDuckGo（带短超时，被墙时快速失败而非挂起）──
     try:
         from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
+        with DDGS(timeout=6) as ddgs:
             raw = list(ddgs.text(query, region="cn-zh", safesearch="moderate", max_results=max_r))
         if raw:
             results = []
@@ -653,31 +694,328 @@ def web_search(query: str, max_results: int = 5) -> str:
                     "href": r.get("href", ""),
                     "body": r.get("body", "")[:200],
                 })
+            if is_news:
+                try:
+                    results = _enhance_news_results(query, results, max_r)
+                except Exception:
+                    pass
             formatted = _format_results(results)
-            if _is_quality_search_result(formatted):
-                _set_search_cache(cache_key, formatted)
-            return formatted
+            if not (is_news and _is_news_irrelevant(formatted)):
+                if _is_quality_search_result(formatted, is_news):
+                    _set_search_cache(cache_key, formatted)
+                return formatted
     except Exception:
         pass
 
-    # ── 3. 拆词降级重试 ──
+    # ── 3. 拆词降级重试（多源并行） ──
     _cut_words = ["现在", "今天", "当前", "实时", "最新的", "一下", "帮我", "请", "吧", "吗", "啊"]
     simplified = query
     for w in _cut_words:
         simplified = simplified.replace(w, "")
     simplified = _re.sub(r"\s+", " ", simplified).strip()
-    if simplified and simplified != query:
-        try:
-            results = _search_baidu(simplified, max_r)
-            if results:
-                formatted = _format_results(results)
-                if _is_quality_search_result(formatted):
+
+    fallback_queries = [simplified]
+    if is_news and simplified != query:
+        fallback_queries.append("今日新闻 " + query.replace("搜索一下", "").replace("新闻", "").strip())
+
+    for _fq in fallback_queries:
+        if not _fq or _fq == query:
+            continue
+        _fb_sources: dict[str, list[dict]] = {}
+        with ThreadPoolExecutor(max_workers=3) as _ex2:
+            _fut2 = {_ex2.submit(_src_fn, _fq, max_r): _name for _name, _src_fn in search_sources}
+            for _fut in _fut2:
+                _name = _fut2[_fut]
+                try:
+                    _res = _fut.result()
+                    if _res:
+                        _fb_sources[_name] = _res
+                except Exception:
+                    pass
+        if _fb_sources:
+            _merged = _merge_search_results(_fb_sources, limit=max_r)
+            if is_news:
+                try:
+                    _merged = _enhance_news_results(query, _merged, max_r)
+                except Exception:
+                    pass
+            formatted = _format_results(_merged)
+            if not (is_news and _is_news_irrelevant(formatted)):
+                if _is_quality_search_result(formatted, is_news):
                     _set_search_cache(cache_key, formatted)
                 return formatted
-        except Exception:
-            pass
+
+    # ── 4. 新闻查询兜底：直接抓主流新闻聚合首页提取今日标题 ──
+    if is_news:
+        for _news_home in ("https://news.sina.com.cn/", "https://news.qq.com/"):
+            try:
+                _heads = _extract_news_headlines(_news_home, limit=max_r)
+            except Exception:
+                _heads = []
+            if _heads:
+                formatted = _format_results([
+                    {"title": h, "href": _news_home, "body": "（今日新闻自动抓取）"} for h in _heads
+                ])
+                if _is_quality_search_result(formatted, is_news):
+                    _set_search_cache(cache_key, formatted)
+                return formatted
 
     return f"未找到与 '{query}' 相关的搜索结果"
+
+
+def _merge_search_results(source_results: dict[str, list[dict]], limit: int = 10) -> list[dict]:
+    """把多个搜索源的结果合并去重，返回综合结果列表。
+
+    去重策略：优先按标题归一化（去掉空白/标点差异）判断是否同一结果；
+    标题不同但链接相同的也视为重复。按固定源优先级（bing→baidu_pc→baidu_mobile）
+    保序合并，保证结果顺序稳定。
+    """
+    import re as _re
+
+    # 固定源优先级（决定结果先后，避免受线程完成顺序影响）
+    _PRIORITY = ("bing", "baidu_pc", "baidu_mobile")
+
+    def _norm_title(t: str) -> str:
+        t = (t or "").lower()
+        # 去空白、常见标点、数字序号
+        t = _re.sub(r"[\s\-—_·|｜:：,，。.、\"'\"'()（）]+", "", t)
+        return t
+
+    merged: list[dict] = []
+    seen_titles: set[str] = set()
+    seen_hrefs: set[str] = set()
+
+    ordered_names = [n for n in _PRIORITY if n in source_results]
+    for _name in ordered_names:
+        for _r in source_results[_name]:
+            title = _r.get("title", "")
+            href = _r.get("href", "") or ""
+            body = _r.get("body", "")
+            if not title or len(title) < 3:
+                continue
+            # 归一化标题去重
+            nt = _norm_title(title)
+            if nt and nt in seen_titles:
+                continue
+            # 规范化 href 去重（去掉尾部斜杠、query 中的常见追踪参数）
+            hkey = href
+            if hkey.startswith("http"):
+                hkey = hkey.split("?")[0].rstrip("/")
+            if hkey and hkey in seen_hrefs and not body:
+                continue
+            if nt:
+                seen_titles.add(nt)
+            if hkey:
+                seen_hrefs.add(hkey)
+            merged.append({"title": title, "href": href, "body": body})
+            if len(merged) >= limit * 2:
+                break
+        if len(merged) >= limit * 2:
+            break
+
+    # 保序去重后的前 limit 条
+    return merged[:limit]
+
+
+# 新闻类查询触发增强的关键词
+_NEWS_QUERY_MARKS = ("新闻", "资讯", "最新", "发生了什么", "大事", "热点", "今天发生了")
+# 新闻标题的典型动词特征（用于从网页正文中甄别具体新闻条目而非导航链接）
+_NEWS_TITLE_VERBS = ("发布", "宣布", "称", "回应", "通报", "开展", "举行", "实现", "发生", "遭遇", "出现", "警告", "报告")
+
+
+def _is_news_query(query: str) -> bool:
+    """判断是否为需要"今日新闻汇总"增强的查询。"""
+    q = query.lower()
+    return any(m in q for m in _NEWS_QUERY_MARKS)
+
+
+def _extract_news_headlines(url: str, limit: int = 8) -> list[str]:
+    """抓取新闻网站首页/频道页，提取具体新闻标题（过滤导航/UI 噪音）。
+
+    核心思路：requests 直抓完整 HTML → BeautifulSoup get_text 拿到完整文本
+    （含真实新闻标题），再按行宽松提取。**不走 web_fetch**（其 _rerank_paragraphs
+    段落筛选会把短新闻标题当低价值段落丢弃）。
+    Jina Reader 作为备用（国内可能被墙）。
+    """
+    import re as _re
+
+    def _parse_html(html: str) -> list[str]:
+        """从 HTML 完整文本行中提取新闻标题（a 链接方式易引入导航噪声，故用全文行）。"""
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        if not text:
+            return []
+        return _lines_to_headlines(text, limit)
+
+    try:
+        import requests
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        })
+        resp = session.get(url, timeout=8, allow_redirects=True)
+        # 中文新闻站点常不返回 charset，requests 会误判为 ISO-8859-1 导致中文乱码，强制用 UTF-8/实际编码
+        if resp.status_code == 200:
+            resp.encoding = resp.apparent_encoding or "utf-8"
+        if resp.status_code == 200 and resp.text and len(resp.text) > 500:
+            heads = _parse_html(resp.text)
+            if heads:
+                return heads
+    except Exception:
+        pass
+
+    # 备用 1: Jina Reader（国内可能被墙，超时快速失败）
+    try:
+        import requests
+        resp = requests.get(f"https://r.jina.ai/{url}", timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code == 200 and resp.text and len(resp.text.strip()) > 100:
+            content = _clean_web_ui_noise(resp.text.strip())
+            if not content.startswith(("[ERROR]", "[INFO]", "[抓取提示]")):
+                heads = _lines_to_headlines(content, limit)
+                if heads:
+                    return heads
+    except Exception:
+        pass
+
+    # 备用 2: web_fetch 文本行提取
+    try:
+        content = web_fetch(url)
+        if content and not content.startswith(("[ERROR]", "[INFO]", "[抓取提示]")):
+            heads = _lines_to_headlines(content, limit)
+            if heads:
+                return heads
+    except Exception:
+        pass
+    return []
+
+
+# 明确的导航/栏目框架短语（含这类词的文本行直接丢弃，不视为新闻标题）
+_NAV_NAV_LINE_MARKS = (
+    "首页", "新闻频道", "客户端", "登录", "注册", "搜索", "更多", "评论", "版权",
+    "设为首页", "设为书签", "保存为书签", "English", "手机版", "手机新浪", "下载", "触屏版",
+    "要闻", "时政", "国际", "国内", "社会", "财经", "体育", "娱乐", "科技",
+    "军事", "生活", "滚动", "NBA", "博客", "视频", "财经号", "收藏", "回到顶部",
+    # 站点通用导航/欢迎语
+    "跳至主要内容", "跳至", "主要内容", "导航", "欢迎来到", "欢迎访问", "菜单",
+    "订阅", "关注我们", "联系我们", "关于我们", "隐私政策", "使用条款", "法律",
+    "网站地图", "新闻稿", "媒体中心", "记者", "公告", "联合国", "联合国新闻",
+    "其他语言", "语言", "无障碍", "帮助", "常见问题", "意见反馈", "友情链接",
+    "合作伙伴", "新闻资讯网", "中国网", "中华网",
+)
+
+
+def _lines_to_headlines(content: str, limit: int = 8) -> list[str]:
+    """从纯文本行中提取新闻标题（宽松判定，重点过滤导航/栏目框架文本）。"""
+    import re as _re
+    headlines: list[str] = []
+    seen: set[str] = set()
+    for line in content.split("\n"):
+        line = line.strip().strip("•·-—0123456789. ").strip()
+        if not line or len(line) < 8 or len(line) > 60:
+            continue
+        # 过滤纯导航/按钮/栏目框架文本
+        if any(m in line for m in _NAV_NAV_LINE_MARKS):
+            continue
+        # 过滤广告/聚合导航标题
+        if _is_ad_or_nav_result(line, "", ""):
+            continue
+        # 纯数字/日期/无实义内容
+        if _re.fullmatch(r"[\d\s年月日时分:.，、#]+\s*", line):
+            continue
+        # 过滤纯话题标签（形如 #xxx#）与纯短词
+        if line.startswith("#") and line.endswith("#"):
+            continue
+        if line not in seen:
+            seen.add(line)
+            headlines.append(line)
+        if len(headlines) >= limit:
+            break
+    return headlines
+
+
+def _enhance_news_results(query: str, results: list[dict], max_results: int) -> list[dict]:
+    """对新闻类查询做结果增强：
+    1. 优先从各结果的摘要(body)里切出具体新闻条目（百度摘要常内嵌多条新闻）；
+    2. 若具体新闻仍不足，再抓取导航首页提取新闻标题补足。
+    目标：把"XX新闻频道/资讯网"这种导航首页，变成"河南西瓜滞销…"这种具体新闻条目。
+    """
+    import re as _re
+    if not _is_news_query(query) or not results:
+        return results
+
+    # 判定一条文本是否为"具体新闻条目"（含新闻动词/日期/时间标记/书名号）
+    def _is_concrete(t: str) -> bool:
+        return bool(
+            any(v in t for v in _NEWS_TITLE_VERBS)
+            or _re.search(r"\d{1,4}[年月日]|\d{1,2}月|\d{1,2}时|\d+\s*[小时分钟天]前", t)
+            or any(ch in t for ch in ("《", "」", "「"))
+            or any(m in t for m in ("新闻", "报道", "强军", "时政", "宏观", "发布会"))
+        )
+
+    enhanced: list[dict] = []
+    existing_titles: set[str] = set()
+
+    def _add(title: str, href: str, body: str = "") -> None:
+        # 只做完全相同的标题去重；不做 body 子串去重（否则会误杀摘要里独立的新闻标题）
+        if not title or len(title) < 6 or title in existing_titles:
+            return
+        existing_titles.add(title)
+        enhanced.append({"title": title, "href": href, "body": body})
+
+    # 1) 先抓主流新闻聚合首页提取具体新闻标题（今日新闻/最新新闻的最可靠来源）
+    #    —— 优先呈现，避免 Bing 返回的门户/摘要碎片占主导
+    home_sources = ("https://news.sina.com.cn/", "https://news.163.com/", "https://news.qq.com/")
+    for _home in home_sources:
+        if len(enhanced) >= max_results:
+            break
+        try:
+            _heads = _extract_news_headlines(_home, limit=max_results - len(enhanced))
+        except Exception:
+            _heads = []
+        for h in _heads:
+            _add(h, _home, "（今日新闻）")
+
+    # 2) 再保留所有非纯导航的原始结果（作为补充，保证信息量）
+    for r in results:
+        title = r.get("title", "")
+        href = r.get("href", "")
+        body = r.get("body", "")
+        if _is_ad_or_nav_result(title, href, body):
+            continue
+        # 跳过纯栏目/导航标题与百科/黄历/天气等无关结果
+        low_title = title.lower()
+        if any(m in low_title for m in _NAV_NAV_LINE_MARKS):
+            continue
+        if any(skip in (href or "").lower() for skip in ("baike.baidu.com", "huangli", "tianqi", "lishi.")):
+            continue
+        _add(title, href, body)
+        if len(enhanced) >= max_results:
+            return enhanced[:max_results]
+
+    # 3) 仍不足时，从原始结果摘要内嵌的具体新闻补充
+    for r in results:
+        href = r.get("href", "")
+        body = r.get("body", "")
+        if not body:
+            continue
+        segments = re.split(r"[|｜·、；;\n]", body)
+        for seg in segments:
+            frags = [seg] if len(seg) <= 40 else re.split(r"[，,。]|\s+", seg)
+            for frag in frags:
+                frag = frag.strip().strip("0123456789. ")
+                if any(nav in frag for nav in ("查看更多", "头条新闻", "观点", ".com.cn", ".cn ")):
+                    continue
+                if _is_concrete(frag) and not _is_ad_or_nav_result(frag, href, ""):
+                    _add(frag, href, "（源自搜索结果摘要）")
+                if len(enhanced) >= max_results:
+                    return enhanced[:max_results]
+
+    return enhanced[:max_results] if enhanced else results
 
 
 def _decrypt_single_baidu_url(href: str) -> str:
@@ -694,6 +1032,135 @@ def _decrypt_single_baidu_url(href: str) -> str:
     except Exception:
         pass
     return href
+
+
+def _search_baidu_mobile(query: str, max_results: int) -> list[dict]:
+    """百度移动版搜索（m.baidu.com）：PC 版反爬时备用，返回内容更丰富。"""
+    import requests
+    from bs4 import BeautifulSoup
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    })
+    try:
+        resp = session.get("https://m.baidu.com/s", params={"word": query}, timeout=8, allow_redirects=True)
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    raw_results: list[dict] = []
+    seen_titles: set[str] = set()
+    # 百度移动版结果容器
+    for container in soup.select("[class*=result], [class*=c-container], .c-result, .result"):
+        a_tag = container.select_one("a[href*='http']") if container else None
+        if not a_tag:
+            continue
+        href = a_tag.get("href", "")
+        title = a_tag.get_text(strip=True)
+        if not title or len(title) < 3 or not href.startswith("http"):
+            continue
+        # 过滤百度移动视频卡片噪声（标题形如 [14:59:00/14:59] 或纯时间戳）
+        if re.match(r"^[\d:\[\]/]{4,}$", title.strip()) or "00:00/" in title:
+            continue
+        # 摘要
+        snippet_el = container.select_one("[class*=abstract], [class*=c-span-last], [class*=content], [class*=summary]")
+        snippet = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
+        if _is_ad_or_nav_result(title, href, snippet):
+            continue
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        raw_results.append({"title": title, "href": href, "body": snippet})
+        if len(raw_results) >= max_results:
+            break
+
+    # 百度移动版链接是密文，尝试解密
+    import concurrent.futures as _cf
+    if raw_results:
+        with _cf.ThreadPoolExecutor(max_workers=min(6, len(raw_results))) as ex:
+            _decrypted = list(ex.map(_decrypt_single_baidu_url, [r["href"] for r in raw_results]))
+        for i, r in enumerate(raw_results):
+            r["href"] = _decrypted[i]
+    return raw_results
+
+
+def _search_bing(query: str, max_results: int) -> list[dict]:
+    """Bing 国内版搜索（cn.bing.com）：国内可稳定访问，结果结构化。"""
+    import requests
+    from bs4 import BeautifulSoup
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    })
+    try:
+        resp = session.get("https://cn.bing.com/search", params={"q": query}, timeout=8, allow_redirects=True)
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    raw_results: list[dict] = []
+    seen_titles: set[str] = set()
+    for item in soup.select("li.b_algo"):
+        a_tag = item.select_one("h2 a")
+        if not a_tag:
+            continue
+        href = a_tag.get("href", "")
+        title = a_tag.get_text(strip=True)
+        if not title or len(title) < 3 or not href.startswith("http"):
+            continue
+        snip_el = item.select_one(".b_caption p, .b_snippet, .b_lineclamp2")
+        snippet = snip_el.get_text(strip=True)[:200] if snip_el else ""
+        if _is_ad_or_nav_result(title, href, snippet):
+            continue
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        raw_results.append({"title": title, "href": href, "body": snippet})
+        if len(raw_results) >= max_results:
+            break
+    return raw_results
+
+
+# 广告/低质结果特征：百度"新闻资讯"等宽泛查询会混入广告与新闻网站首页入口
+_AD_MARKS = ("下载", "安装", "一键", "高速通道", "app下载", "立即下载", "@百度", "推广")
+_NAV_TITLE_MARKS = ("新闻频道", "资讯网", "资讯首页", "新闻网", "今日头条", "客户端")
+# 纯导航聚合标题特征："今日新闻|今日国际新闻|今日中国新闻|..."
+_NAV_AGGREGATE_MARKS = ("今日新闻|", "|今日", "今日最新新闻", "今日国内新闻", "今日国际新闻", "今日社会")
+_NAV_BODY_MARKS = ("提供今日新闻", "今日新闻栏目", "为您提供", "欢迎访问", "快捷入口", "点击进入")
+
+
+def _is_ad_or_nav_result(title: str, href: str, snippet: str) -> bool:
+    """判断搜索结果是否为广告或纯导航首页入口（无具体信息价值）。"""
+    low_title = (title or "").lower()
+    low_href = (href or "").lower()
+    low_body = (snippet or "").lower()
+
+    # 广告特征：标题/摘要含下载类动词，或链接指向百度广告跳转
+    if any(m in low_title for m in _AD_MARKS):
+        return True
+    if any(m in low_body for m in _AD_MARKS):
+        return True
+    if "baidu.com/link" in low_href and "ad" in low_href:
+        return True
+
+    # 纯导航聚合标题："今日新闻|今日国际新闻|今日中国新闻|..." 无具体信息
+    if any(m in title for m in _NAV_AGGREGATE_MARKS):
+        return True
+    # 导航首页特征：标题是"XX新闻频道/资讯网"，且摘要是导航套话而非具体事件
+    if any(m in low_title for m in _NAV_TITLE_MARKS):
+        return True
+    # 标题本身是网站名 + 摘要是导航套话 → 判定为无信息价值的首页入口
+    if any(m in low_body for m in _NAV_BODY_MARKS) and any(m in low_title for m in _NAV_TITLE_MARKS):
+        return True
+
+    return False
 
 
 def _search_baidu(query: str, max_results: int) -> list[dict]:
@@ -742,6 +1209,11 @@ def _search_baidu(query: str, max_results: int) -> list[dict]:
         if not snippet_el:
             snippet_el = container.select_one("[class*=abstract], [class*=summary]")
         snippet = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
+
+        # ── 广告 / 低质导航首页过滤（方案B 第1层）──
+        if _is_ad_or_nav_result(title, href, snippet):
+            continue
+
         seen_titles.add(title)
         raw_results.append({"title": title, "href": href, "body": snippet})
 
@@ -806,10 +1278,19 @@ def _format_results(results: list[dict]) -> str:
     lines = []
     for i, r in enumerate(results, 1):
         title = r.get("title", "无标题")
-        href = r.get("href", "")
-        body = r.get("body", "")[:200]
-        lines.append(f"{i}. [{title}]\n   {href}\n   {body}")
-    return "\n\n".join(lines) if lines else "无结果"
+        href = r.get("href", "") or ""
+        body = r.get("body", "")[:80]
+        # 百度密文链接极长，截断显示（保留域名），避免污染输出
+        if len(href) > 120 or "baidu.com/baidu.php" in href or "/link?url=" in href:
+            display = "https://www.baidu.com/…"
+        else:
+            display = href
+        # 紧凑格式：标题 + 域名 + 简短摘要，减少 token
+        if body:
+            lines.append(f"{i}. {title} | {display} | {body}")
+        else:
+            lines.append(f"{i}. {title} | {display}")
+    return "\n".join(lines) if lines else "无结果"
 
 
 def _rerank_paragraphs(text: str, max_chars: int = 4000) -> str:
