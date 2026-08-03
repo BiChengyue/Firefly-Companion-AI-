@@ -10,7 +10,7 @@ import { pickFolder } from '@/services/folderPicker'
 import { useTaskSync } from '@/composables/useTaskSync'
 
 const companion = useCompanionStore()
-const { tasks, sortedTasks, toggleTask, deleteTask, addTask, onExternalChange } = useTaskSync()
+const { sortedTasks, toggleTask, deleteTask, addTask, onExternalChange } = useTaskSync()
 
 // ── 设置弹窗 ────────────────────────────────────────────
 const showSettings = ref(false)

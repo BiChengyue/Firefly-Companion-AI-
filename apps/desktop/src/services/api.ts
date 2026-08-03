@@ -116,8 +116,19 @@ export function renameSession(sessionId: string, title: string): Promise<{ ok: b
   })
 }
 
-export function getSessionHistory(sessionId: string, limit = 50): Promise<Array<{ role: string; content: string; emotion?: string; createdAt: number }>> {
+export function getSessionHistory(sessionId: string, limit = 50): Promise<Array<{ id: number; role: string; content: string; emotion?: string; createdAt: number }>> {
   return request(`/api/sessions/${sessionId}/history?limit=${limit}`)
+}
+
+export function deleteMessage(sessionId: string, messageId: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/sessions/${sessionId}/messages/${messageId}`, { method: 'DELETE' })
+}
+
+export function deleteMessageByContent(sessionId: string, role: string, content: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/sessions/${sessionId}/messages/by-content`, {
+    method: 'DELETE',
+    body: JSON.stringify({ role, content }),
+  })
 }
 
 // ── 阶段3：记忆 API ──

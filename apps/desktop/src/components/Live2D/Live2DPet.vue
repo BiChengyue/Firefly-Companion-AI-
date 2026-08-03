@@ -122,9 +122,6 @@ function applyEmotion(emotionLabel: string) {
   if (mapping.expression !== undefined && typeof model.expression === 'function') {
     model.expression(mapping.expression)
   }
-  if (mapping.motion && typeof model.motion === 'function') {
-    model.motion(mapping.motion[0], mapping.motion[1])
-  }
 }
 
 /** 应用主动聊天表情 — 使用 PROACTIVE_MOTION_MAP 解析后端传来的字符串名 */

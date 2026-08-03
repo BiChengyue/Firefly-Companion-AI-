@@ -288,7 +288,7 @@ def load_history(
     conn = _get_conn(db_path)
     if mode:
         rows = conn.execute(
-            """SELECT role, content, emotion, mode, created_at FROM chat_history
+            """SELECT id, role, content, emotion, mode, created_at FROM chat_history
                WHERE session_id=? AND mode=?
                ORDER BY created_at DESC
                LIMIT ?""",
@@ -296,7 +296,7 @@ def load_history(
         ).fetchall()
     else:
         rows = conn.execute(
-            """SELECT role, content, emotion, mode, created_at FROM chat_history
+            """SELECT id, role, content, emotion, mode, created_at FROM chat_history
                WHERE session_id=?
                ORDER BY created_at DESC
                LIMIT ?""",
@@ -304,9 +304,52 @@ def load_history(
         ).fetchall()
     rows.reverse()  # 转为正序
     return [
-        {"role": r[0], "content": r[1], "emotion": r[2], "mode": r[3], "createdAt": r[4]}
+        {"id": r[0], "role": r[1], "content": r[2], "emotion": r[3], "mode": r[4], "createdAt": r[5]}
         for r in rows
     ]
+
+
+def delete_message(message_id: int, session_id: Optional[str] = None, db_path: Optional[str] = None) -> bool:
+    """按 id 删除单条消息。可选限定 session_id 防止跨会话误删。"""
+    conn = _get_conn(db_path)
+    with _write_lock:
+        if session_id:
+            cur = conn.execute(
+                "DELETE FROM chat_history WHERE id=? AND session_id=?",
+                (message_id, session_id),
+            )
+        else:
+            cur = conn.execute("DELETE FROM chat_history WHERE id=?", (message_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_message_by_content(
+    session_id: str,
+    role: str,
+    content: str,
+    db_path: Optional[str] = None,
+) -> bool:
+    """按角色+内容删除该会话中最近一条匹配的消息。
+
+    用于前端删除"本次会话刚发送、仅有临时 id 的新消息"时，
+    通过内容定位后端记录，确保删除后重开不再出现。
+    仅删除该会话内 role/content 完全匹配的最近一条，避免误删其他会话/其他内容。
+    """
+    if not content:
+        return False
+    conn = _get_conn(db_path)
+    with _write_lock:
+        # 找到最近一条完全匹配的（内容相同则删 id 最大、即最新的一条）
+        row = conn.execute(
+            "SELECT id FROM chat_history WHERE session_id=? AND role=? AND content=? ORDER BY id DESC LIMIT 1",
+            (session_id, role, content),
+        ).fetchone()
+        if not row:
+            return False
+        cur = conn.execute("DELETE FROM chat_history WHERE id=? AND session_id=?", (row[0], session_id))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def clear_history(session_id: str, db_path: Optional[str] = None) -> None:

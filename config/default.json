@@ -1,0 +1,193 @@
+{
+  "llm": {
+    "provider": "openai_compat",
+    "model": "deepseek-v4-flash",
+    "apiKey": "",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "temperature": 0.8,
+    "maxTokens": 384000,
+    "enableThinking": false
+  },
+  "mode": {
+    "current": "daily",
+    "switchCooldownMs": 500
+  },
+  "voice": {
+    "stt": {
+      "engine": "faster-whisper",
+      "model": "base",
+      "language": "zh"
+    },
+    "tts": {
+      "engine": "minimax",
+      "voice": "custom",
+      "rate": "+0%",
+      "volume": "+0%"
+    },
+    "wakeWord": "流萤",
+    "wakeWordEnabled": false,
+    "gptSovits": {
+      "pythonPath": "",
+      "apiUrl": "http://127.0.0.1:9880"
+    },
+    "minimax": {
+      "apiKey": "",
+      "voiceId": "zh-CN-XiaoyiNeural"
+    }
+  },
+  "memory": {
+    "shortTermWindow": 20,
+    "longTermEnabled": true,
+    "chromaPath": "./data/chroma",
+    "dbPath": "./data/app.db",
+    "summaryThreshold": 30,
+    "confidenceThreshold": 0.75,
+    "memoryExtractionInterval": 2,
+    "embeddingEngine": "hash",
+    "onnxModelPath": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  },
+  "live2d": {
+    "modelPath": "./resources/live2d/firefly/firefly.model3.json",
+    "fps": 60,
+    "scale": 1.0,
+    "autoBlink": true,
+    "autoBreath": true
+  },
+  "desktop": {
+    "alwaysOnTop": true,
+    "transparent": true,
+    "autoStart": false,
+    "globalShortcut": "Ctrl+Shift+F",
+    "ctrlOverrideEnabled": true
+  },
+  "performance": {
+    "llmFirstTokenMs": 2000,
+    "streamingTps": 15,
+    "memoryIdleMb": 350,
+    "memoryActiveMb": 600,
+    "cpuIdlePercent": 3,
+    "live2dFps": 45,
+    "startupMs": 5000
+  },
+  "agent": {
+    "enabled": true,
+    "maxSteps": 20,
+    "hardMaxSteps": 50,
+    "stepTimeout": 30,
+    "sandbox": {
+      "allowedPaths": [
+        "~/Desktop",
+        "~/Documents",
+        "~/Downloads",
+        "~/Pictures",
+        "D:/project",
+        "D:/projects",
+        "~/projects",
+        "~/dev"
+      ],
+      "blockedPaths": [
+        "C:/Windows",
+        "C:/Program Files",
+        "C:/Program Files (x86)",
+        "~/.ssh"
+      ],
+      "blockedCommands": [
+        "format",
+        "shutdown",
+        "rd /s",
+        "del /f /s /q C:",
+        "rm -rf /"
+      ],
+      "commandWhitelist": [
+        "dir",
+        "ls",
+        "copy",
+        "move",
+        "git",
+        "python",
+        "node",
+        "pnpm"
+      ],
+      "requireApproval": [
+        "run_shell",
+        "gui_click",
+        "gui_type",
+        "run_python"
+      ],
+      "autoApprove": [
+        "file_read",
+        "file_search",
+        "get_weather",
+        "web_search",
+        "get_datetime"
+      ]
+    },
+    "codeRunner": {
+      "engine": "restrictedpython+subprocess",
+      "cpuTimeout": 10,
+      "memoryLimitMb": 256,
+      "networkAccess": false,
+      "outputTruncateKb": 10,
+      "importWhitelist": [
+        "math",
+        "json",
+        "re",
+        "datetime",
+        "collections",
+        "itertools",
+        "functools"
+      ],
+      "importBlacklist": [
+        "os",
+        "sys",
+        "subprocess",
+        "socket",
+        "ctypes",
+        "shutil"
+      ]
+    },
+    "tools": {
+      "browser": {
+        "enabled": true,
+        "headless": false
+      },
+      "gui": {
+        "enabled": false
+      },
+      "codeRunner": {
+        "enabled": true,
+        "timeout": 10
+      }
+    },
+    "rollback": {
+      "enabled": true,
+      "logPath": "./data/agent/rollback"
+    },
+    "toolRetryCount": 2,
+    "toolRetryDelay": 1.0,
+    "compactEnabled": true,
+    "compactTriggerRatio": 0.75,
+    "logEnabled": true,
+    "logPath": "./data/agent/logs",
+    "checkpointEnabled": true
+  },
+  "lore": {
+    "enabled": true,
+    "indexPath": "./data/lore_index.db",
+    "highThreshold": 0.75,
+    "lowThreshold": 0.6,
+    "topK": 4,
+    "maxChars": 2400
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "proactiveChat": {
+    "enabled": true,
+    "idleMinutes": 10,
+    "quietHoursStart": 23,
+    "quietHoursEnd": 8,
+    "dailyLimit": 5
+  }
+}

@@ -15,7 +15,6 @@ server.log
 
 # 本地配置（含密钥，不要提交）
 config/*.local.json
-config/default.json
 .env
 
 # 编辑器
@@ -60,7 +59,7 @@ scratch_weekly_decay_test.db
 test_mem.db
 firefly-companion-desktop.exe
 apps/build_rust.log
-apps/desktop/tsconfig.*.tsbuildinfo
+*.tsbuildinfo
 apps/desktop/vite.config.js
 apps/desktop/vite.config.d.ts
 resources/voice/gpt_sovits_engine/bin/

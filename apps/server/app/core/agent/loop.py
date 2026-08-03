@@ -243,6 +243,14 @@ async def run_agent_loop(
             aborted = True
             break
 
+        # 记录最近一个信息类工具（deep_research/web_search/web_fetch）的完整输出，
+        # 供后续 file_write 步骤在 content 为空时自动填充（Agent 一次性规划无法预知研究输出）。
+        # 用可变 dict 作为共享容器，串行路径与并行路径都能读写。
+        # 注意：必须在 while 循环最开头初始化，因为并行化预处理（下方）在串行循环之前就会引用它。
+        research_sink: dict = {"output": None, "source": None}
+        pending_research_output: str | None = None
+        pending_research_source: str | None = None
+
         # 找到待执行的步骤
         pending = [s for s in all_steps if s["status"] == "pending"]
         if not pending:
@@ -259,7 +267,13 @@ async def run_agent_loop(
         ]
         if len(_parallel_candidates) >= 2:
             logger.info("[loop] 并行执行 %d 个无依赖步骤", len(_parallel_candidates))
-            await _execute_parallel_group(_parallel_candidates, ws, cancel_event, settings, all_observations)
+            await _execute_parallel_group(
+                _parallel_candidates, ws, cancel_event, settings, all_observations, research_sink=research_sink,
+            )
+            # 并行组内若执行了 deep_research/web_fetch，把其完整输出同步给后续 file_write 填充用
+            if research_sink.get("output"):
+                pending_research_output = research_sink["output"]
+                pending_research_source = research_sink.get("source") or "deep_research"
             for _s in _parallel_candidates:
                 budget.add(_s["observation"])
                 if compact_enabled and budget.should_compact():
@@ -332,7 +346,22 @@ async def run_agent_loop(
                     await _send_json(ws, {"type": "step_update", "step": step})
                     continue
 
-            # 2b. 执行步骤 + 超时保护 + 取消支持
+            # 2b. 数据传递：file_write 步骤 content 为空时，自动用最近一次
+            #     信息类工具（deep_research/web_search/web_fetch）的完整输出填充。
+            #     原因：Agent 一次性规划时无法预知研究输出，导致"深度研究→写文件"场景 content 缺失。
+            if step["action"] == "file_write" and pending_research_output:
+                _ai = step["action_input"]
+                _content = str(_ai.get("content", "") or "").strip()
+                if not _content or _content in ("___CONTENT___", "{{content}}", "研究结果", "同上"):
+                    _ai["content"] = pending_research_output
+                    step_dict["action_input"] = _ai
+                    # 记录已自动填充，便于前端理解
+                    logger.info(
+                        "[loop] file_write content 为空，已用前序 %s 输出自动填充（%d 字符）",
+                        pending_research_source, len(pending_research_output),
+                    )
+
+            # 2c. 执行步骤 + 超时保护 + 取消支持
             try:
                 obs = await asyncio.wait_for(
                     execute_step(step_dict, ws, cancel_event=cancel_event),
@@ -348,6 +377,16 @@ async def run_agent_loop(
             sanitized_obs = _sanitize_observation(obs, max_length=max_obs_len)
             step["observation"] = sanitized_obs
             all_observations.append(sanitized_obs)
+
+            # 记录信息类工具的完整输出，供后续 file_write 自动填充 content
+            if step["action"] in _info_tools and not obs.startswith("[ERROR]"):
+                # 只对 deep_research 等"产出正文"的工具记录全文（web_search 的结果列表不宜直接写入文件）
+                if step["action"] == "deep_research" and obs and len(obs.strip()) > 50:
+                    pending_research_output = obs.strip()
+                    pending_research_source = "deep_research"
+                elif step["action"] in ("web_fetch",) and obs and len(obs.strip()) > 50:
+                    pending_research_output = obs.strip()
+                    pending_research_source = "web_fetch"
 
             # ── Token 预算跟踪 ──
             budget.add(obs)
@@ -647,6 +686,54 @@ def _build_fallback_steps(user_input: str) -> list[dict]:
     import re
     text = user_input.lower()
     steps: list[dict] = []
+
+    # 从输入提取目标报告文件名（如"研究报告.md"），默认"研究报告.md"
+    _report_filename_m = re.search(
+        r'([\u4e00-\u9fffA-Za-z0-9_\-]{2,20})\.md\b',
+        user_input,
+    )
+    report_filename = (_report_filename_m.group(1) + ".md") if _report_filename_m else "研究报告.md"
+    # 剔除文件名前误带的研究/生成/保存/写入等动词前缀（如"生成研究报告.md"→"研究报告.md"）
+    for _prefix in ("生成研究", "生成", "保存", "写入", "写到", "把"):
+        if report_filename.startswith(_prefix) and len(report_filename) > len(_prefix) + 2:
+            report_filename = report_filename[len(_prefix):]
+            break
+
+    # ── 0. 深度研究 + 生成报告/写文件 意图 → deep_research → file_write ──
+    # 用户常让 LLM 自然语言规划（不输出 JSON），此处识别"深入研究X并生成md报告"的完整意图，
+    # 避免被下方的 file_search 误判为"搜索md文件"。
+    _research_kw = ["研究", "调研", "deep", "调查", "分析报告", "研究报告"]
+    _report_kw = ["报告", "md", "markdown", "生成", "写入", "保存", "写到", "产出", "文档"]
+    has_research = any(kw in text for kw in _research_kw)
+    has_report = any(kw in text for kw in _report_kw)
+    if has_research and has_report:
+        # 提取研究主题（去掉研究/生成/报告/输出等指令词与标点；注意长词在前避免残留）
+        topic = user_input
+        for kw in ["工作空间下", "工作区", "研究报告.md", "帮我", "请", "麻烦", "深入研究一下",
+                   "调研一下", "分析一下", "深入研究", "研究一下", "详细研究", "然后", "并且",
+                   "接着", "生成研究报告", "生成报告", "研究报告", "报告", "markdown", "md",
+                   "文档", "放到", "保存到", "写入", "写", "生成", "我的", "工作空间",
+                   "到", "的", "一下", "下", "里", "中"]:
+            topic = topic.replace(kw, " ")
+        # 清理残留标点与孤立动词
+        topic = re.sub(r"[。！？，,.?!、；;：:【】\[\]()（）—\-_\s]+", " ", topic).strip()
+        # 兜底清理：开头/末尾的孤立介词助词
+        topic = re.sub(r"^(关于|针对|就|对|有关)\s*", "", topic).strip()
+        topic = re.sub(r"\s*(的发展|的趋势|报告|分析)$", "", topic).strip()
+        if topic and len(topic) >= 4:
+            steps.append({
+                "thought": f"深度研究: {topic[:60]}",
+                "action": "deep_research",
+                "action_input": {"topic": topic[:200]},
+                "risk_level": "low",
+            })
+            steps.append({
+                "thought": f"将研究报告写入 {report_filename}",
+                "action": "file_write",
+                "action_input": {"path": report_filename, "content": ""},
+                "risk_level": "medium",
+            })
+            return steps
 
     # ── 1. URL / 链接 → web_fetch ──
     url_match = re.search(r'https?://[^\s\u4e00-\u9fff]+', user_input)
@@ -1145,10 +1232,15 @@ async def _execute_parallel_group(
     cancel_event: asyncio.Event | None,
     settings,
     all_observations: list[str],
+    research_sink: dict | None = None,
 ) -> None:
     """并行执行一组无依赖步骤。
 
     使用 asyncio.gather 并行运行，任意失败不影响其他步骤。
+
+    若传入 research_sink（dict），并行组内 deep_research/web_fetch 的完整输出
+    会被写入 research_sink["output"] / research_sink["source"]，
+    供后续 file_write 步骤在 content 为空时自动填充（与串行路径行为一致）。
     """
     if len(steps) <= 1:
         # 单步骤 → 走正常串行路径
@@ -1185,6 +1277,15 @@ async def _execute_parallel_group(
             obs = f"[TIMEOUT] 步骤超时（>{settings.agent.step_timeout}s）"
 
         step["observation"] = obs
+
+        # 并行组内也记录信息类工具完整输出，供后续 file_write 自动填充 content
+        if research_sink is not None and not obs.startswith("[ERROR]"):
+            if step["action"] == "deep_research" and obs and len(obs.strip()) > 50:
+                research_sink["output"] = obs.strip()
+                research_sink["source"] = "deep_research"
+            elif step["action"] == "web_fetch" and obs and len(obs.strip()) > 50:
+                research_sink["output"] = obs.strip()
+                research_sink["source"] = "web_fetch"
 
         if obs.startswith("[ERROR]") or obs.startswith("[BLOCKED]") or obs.startswith("[TIMEOUT]"):
             step["status"] = "failed"

@@ -37,7 +37,6 @@ let lastLoadTime = 0
 const MIN_LOAD_INTERVAL = 3000 // 两次加载最小间隔 3 秒，防频繁刷新
 
 // ── 数据量大时的分页展示（每组默认显示 3 条，可展开全部或收起）──
-let _ = 0  // 保留位置；旧 GROUP_PAGE_SIZE 已替换为 PAGE_SIZE_STEP
 
 function handleMemoryUpdated() {
   lastLoadTime = 0 // 重置冷却时间，保证实时加载
@@ -73,7 +72,6 @@ async function doSearch() {
   searching.value = true
   isSearchActive.value = true
   collapsedGroups.value = {} // 搜索时强制展开所有匹配的分组
-  groupExpanded.value = {}   // 重置分页展开状态
   console.log(`[MemoryWidget] 🔍 开始搜索: "${q}", mode=${companion.mode}, version=${version}`)
   try {
     const results = await api.searchMemories(q, companion.mode)

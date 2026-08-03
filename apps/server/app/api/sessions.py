@@ -62,3 +62,23 @@ async def delete(session_id: str) -> dict:
     if not ok:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"ok": True}
+
+
+@router.delete("/api/sessions/{session_id}/messages/by-content")
+async def delete_message_by_content(session_id: str, payload: dict) -> dict:
+    """按角色+内容删除该会话最近一条匹配的消息（用于前端删除仅有临时 id 的新消息）。"""
+    role = payload.get("role", "")
+    content = payload.get("content", "")
+    ok = _db.delete_message_by_content(session_id, role, content)
+    if not ok:
+        raise HTTPException(status_code=404, detail="未找到匹配的消息")
+    return {"ok": True}
+
+
+@router.delete("/api/sessions/{session_id}/messages/{message_id}")
+async def delete_message(session_id: str, message_id: int) -> dict:
+    """删除会话中的单条消息。message_id 为 chat_history 表真实行 id。"""
+    ok = _db.delete_message(message_id, session_id=session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    return {"ok": True}

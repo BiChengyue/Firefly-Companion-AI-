@@ -56,7 +56,8 @@ export const useCompanionStore = defineStore('companion', () => {
     try {
       const history = await api.getSessionHistory(sessionId, 50)
       return history.map((h, i) => ({
-        id: `h-${sessionId}-${i}`,
+        // 优先用后端真实行 id（供"删除单条消息"使用），后端未返回时退回临时索引 id
+        id: typeof h.id === 'number' && Number.isFinite(h.id) ? String(h.id) : `h-${sessionId}-${i}`,
         role: h.role as 'user' | 'assistant' | 'system',
         content: h.content,
         emotion: h.emotion as ChatMessage['emotion'],
@@ -181,7 +182,8 @@ export const useCompanionStore = defineStore('companion', () => {
       try {
         const history = await api.getSessionHistory(sessionId, 50)
         return history.map((h, i) => ({
-          id: `h-${sessionId}-${i}`,
+          // 用后端真实行 id（供"删除单条消息"删除数据库记录）；后端未返回时退回临时索引 id
+          id: typeof h.id === 'number' && Number.isFinite(h.id) ? String(h.id) : `h-${sessionId}-${i}`,
           role: h.role as 'user' | 'assistant' | 'system',
           content: h.content,
           emotion: h.emotion as ChatMessage['emotion'],
@@ -390,6 +392,39 @@ async function deleteSession(id: string) {
     }
   }
   showToast('会话已删除', 'success')
+}
+
+async function deleteMessage(msgId: string) {
+  // 从消息列表移除（后端持久化记录随后同步删除）
+  const idx = messages.value.findIndex((m) => m.id === msgId)
+  if (idx === -1) return
+  const msg = messages.value[idx]
+  const msgContent = typeof msg.content === 'string' ? msg.content : ''
+  messages.value.splice(idx, 1)
+
+  const numericId = Number(msgId)
+  const isRealId = /^\d+$/.test(msgId)
+
+  // 先删后端（历史消息用真实 id；本次会话刚发送的临时 id 消息用"内容+角色"匹配删除，
+  // 避免"UI 删了但数据库还在、重开后消息又回来"）
+  let backendOk = true
+  if (activeSessionId.value) {
+    try {
+      if (isRealId) {
+        await api.deleteMessage(activeSessionId.value, numericId)
+      } else {
+        await api.deleteMessageByContent(activeSessionId.value, msg.role, msgContent)
+      }
+    } catch (e) {
+      const errMsg = (e as { message?: string })?.message
+      console.warn('[store] 后端删除单条消息失败:', e)
+      backendOk = false
+      // 后端删除失败则回滚本地，避免"UI 消失但数据库仍在"
+      if (msg) messages.value.splice(idx, 0, msg)
+      showToast(`消息删除失败${errMsg ? `：${errMsg}` : ''}`, 'error')
+    }
+  }
+  void backendOk
 }
 
 async function renameSession(id: string, title: string) {
@@ -701,8 +736,9 @@ async function renameSession(id: string, title: string) {
   }
 
   function rotateAvatar() {
+    // getAvatarList() 已保证返回非空列表（含默认 fallback），count 恒 > 0
     const list = getAvatarList()
-    const count = list.length > 0 ? list.length : (isWork.value ? WORK_COUNT : DAILY_COUNT)
+    const count = list.length
     if (isWork.value) {
       avatarIndexWork.value = (avatarIndexWork.value + 1) % count
     } else {
@@ -713,7 +749,7 @@ async function renameSession(id: string, title: string) {
 
   function rotateAvatarLeft() {
     const list = getAvatarList()
-    const count = list.length > 0 ? list.length : (isWork.value ? WORK_COUNT : DAILY_COUNT)
+    const count = list.length
     if (isWork.value) {
       avatarIndexWork.value = (avatarIndexWork.value - 1 + count) % count
     } else {
@@ -833,6 +869,7 @@ async function renameSession(id: string, title: string) {
     activeWorkspaceName,
     switchSession,
     deleteSession,
+    deleteMessage,
     renameSession,
     clearCurrentSession,
     // 阶段4：Agent 任务

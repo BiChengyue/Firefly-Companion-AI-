@@ -938,6 +938,30 @@ def _lines_to_headlines(content: str, limit: int = 8) -> list[str]:
     return headlines
 
 
+# 常见新闻门户站点名/栏目名（标题含这些且无具体事件信息时，视为门户首页而非具体新闻）
+_PORTAL_NAMES = (
+    "新华网", "澎湃", "网易新闻", "腾讯新闻", "新浪新闻", "央视网", "环球网", "人民网",
+    "中国新闻网", "凤凰网", "搜狐新闻", "今日头条", "东方网", "国际在线", "中国网",
+    "光明网", "经济日报", "参考消息", "中新网", "界面新闻", "财联社", "第一财经",
+)
+
+
+def _is_portal_home_title(title: str, href: str) -> bool:
+    """判断是否为新闻门户首页/栏目入口（无具体事件信息），而非具体新闻条目。"""
+    if not title:
+        return False
+    t = title.strip()
+    # 门户站点名 + 栏目描述（如"新华网_让新闻离你更近"）
+    if any(name in t and "|" in t for name in _PORTAL_NAMES):
+        return True
+    if any(name in t and "让新闻" in t for name in _PORTAL_NAMES):
+        return True
+    # 明确的栏目首页标题（如"澎湃24h最热榜""网易新闻中心最新新闻"）
+    if any(m in t for m in ("最热榜", "新闻中心最新新闻", "24h", "今日谈", "最新播报")):
+        return True
+    return False
+
+
 def _enhance_news_results(query: str, results: list[dict], max_results: int) -> list[dict]:
     """对新闻类查询做结果增强：
     1. 优先从各结果的摘要(body)里切出具体新闻条目（百度摘要常内嵌多条新闻）；
@@ -950,11 +974,15 @@ def _enhance_news_results(query: str, results: list[dict], max_results: int) -> 
 
     # 判定一条文本是否为"具体新闻条目"（含新闻动词/日期/时间标记/书名号）
     def _is_concrete(t: str) -> bool:
+        # 门户介绍文本（"澎湃是植根于...""以最活跃的原创新闻..."）不视为具体新闻
+        if any(m in t for m in ("植根于", "原创新闻", "思想分析", "互联网平台", "新闻与思想",
+                                "时政思想", "新闻频道", "栏目", "全媒体", "融媒体")):
+            return False
         return bool(
             any(v in t for v in _NEWS_TITLE_VERBS)
-            or _re.search(r"\d{1,4}[年月日]|\d{1,2}月|\d{1,2}时|\d+\s*[小时分钟天]前", t)
+            or _re.search(r"\d{1,4}[年月日]|\d{1,2}月|\d{1,2}时|\d+\s*[小时分钟天]前|\d+死\d+伤", t)
             or any(ch in t for ch in ("《", "」", "「"))
-            or any(m in t for m in ("新闻", "报道", "强军", "时政", "宏观", "发布会"))
+            or any(m in t for m in ("报道", "发布会", "通报", "警方", "官方", "国家", "公司"))
         )
 
     enhanced: list[dict] = []
@@ -964,45 +992,21 @@ def _enhance_news_results(query: str, results: list[dict], max_results: int) -> 
         # 只做完全相同的标题去重；不做 body 子串去重（否则会误杀摘要里独立的新闻标题）
         if not title or len(title) < 6 or title in existing_titles:
             return
+        # 门户首页/栏目标题不作为具体新闻条目
+        if _is_portal_home_title(title, href):
+            return
         existing_titles.add(title)
         enhanced.append({"title": title, "href": href, "body": body})
 
-    # 1) 先抓主流新闻聚合首页提取具体新闻标题（今日新闻/最新新闻的最可靠来源）
-    #    —— 优先呈现，避免 Bing 返回的门户/摘要碎片占主导
-    home_sources = ("https://news.sina.com.cn/", "https://news.163.com/", "https://news.qq.com/")
-    for _home in home_sources:
-        if len(enhanced) >= max_results:
-            break
-        try:
-            _heads = _extract_news_headlines(_home, limit=max_results - len(enhanced))
-        except Exception:
-            _heads = []
-        for h in _heads:
-            _add(h, _home, "（今日新闻）")
-
-    # 2) 再保留所有非纯导航的原始结果（作为补充，保证信息量）
+    # 1) 先从三源结果的摘要里拆出具体新闻条目（门户首页 body 常内嵌多条具体新闻）
+    #    —— 让三个源的真实结果优先体现
     for r in results:
+        href = r.get("href", "")
+        body = r.get("body", "")
         title = r.get("title", "")
-        href = r.get("href", "")
-        body = r.get("body", "")
-        if _is_ad_or_nav_result(title, href, body):
-            continue
-        # 跳过纯栏目/导航标题与百科/黄历/天气等无关结果
-        low_title = title.lower()
-        if any(m in low_title for m in _NAV_NAV_LINE_MARKS):
-            continue
-        if any(skip in (href or "").lower() for skip in ("baike.baidu.com", "huangli", "tianqi", "lishi.")):
-            continue
-        _add(title, href, body)
-        if len(enhanced) >= max_results:
-            return enhanced[:max_results]
-
-    # 3) 仍不足时，从原始结果摘要内嵌的具体新闻补充
-    for r in results:
-        href = r.get("href", "")
-        body = r.get("body", "")
         if not body:
             continue
+        # 若是门户首页（标题是站点名），优先拆摘要；否则保留原结果后续处理
         segments = re.split(r"[|｜·、；;\n]", body)
         for seg in segments:
             frags = [seg] if len(seg) <= 40 else re.split(r"[，,。]|\s+", seg)
@@ -1014,6 +1018,41 @@ def _enhance_news_results(query: str, results: list[dict], max_results: int) -> 
                     _add(frag, href, "（源自搜索结果摘要）")
                 if len(enhanced) >= max_results:
                     return enhanced[:max_results]
+
+    # 2) 再保留三源结果中独立的具体新闻条目（非门户、非导航）
+    for r in results:
+        title = r.get("title", "")
+        href = r.get("href", "")
+        body = r.get("body", "")
+        if _is_ad_or_nav_result(title, href, body):
+            continue
+        # 跳过纯栏目/导航标题（含"新华网""澎湃""网易新闻中心"等门户站点名）
+        low_title = title.lower()
+        if any(m in low_title for m in _NAV_NAV_LINE_MARKS):
+            continue
+        if any(skip in (href or "").lower() for skip in ("baike.baidu.com", "huangli", "tianqi", "lishi.")):
+            continue
+        # 过滤门户首页标题（站点名/栏目名，无具体事件信息）
+        if _is_portal_home_title(title, href):
+            continue
+        _add(title, href, body)
+        if len(enhanced) >= max_results:
+            return enhanced[:max_results]
+
+    # 3) 仍不足时，才抓主流新闻聚合首页标题兜底补足（三源结果不足的最后手段）
+    if len(enhanced) < max_results:
+        home_sources = ("https://news.sina.com.cn/", "https://news.163.com/", "https://news.qq.com/")
+        for _home in home_sources:
+            if len(enhanced) >= max_results:
+                break
+            try:
+                _heads = _extract_news_headlines(_home, limit=max_results - len(enhanced))
+            except Exception:
+                _heads = []
+            for h in _heads:
+                _add(h, _home, "（今日新闻）")
+                if len(enhanced) >= max_results:
+                    break
 
     return enhanced[:max_results] if enhanced else results
 

@@ -8,8 +8,6 @@ import { ref } from 'vue'
  */
 export const useSettingsStore = defineStore('settings', () => {
   // ── Base64 混淆工具（防本地明文暴露，非加密）──
-  const SENSITIVE_KEYS = new Set(['firefly_api_key', 'firefly_minimax_api_key'])
-
   function obfuscate(text: string): string {
     if (!text) return ''
     try { return btoa(unescape(encodeURIComponent(text))) } catch { return text }

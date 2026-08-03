@@ -49,26 +49,43 @@ export function parseTimeExpression(input: string): { text: string; dueTimestamp
   const targetDate = new Date()
   let timeFound = false
 
-  // 1. 相对时间：秒 / 分 / 时
-  const secondsMatch = text.match(/(\d+)\s*(秒后|s|sec)/i)
-  const minutesMatch = text.match(/(\d+)\s*(分钟后?|分后|m|min)/i)
-  const hoursMatch = text.match(/(\d+)\s*(小时后?|时后|h|hour)/i)
+  // 中文数字转阿拉伯数字（支持 十/十二/二十/五/零 等常用表达）
+  const cnNumToInt = (s: string): number | null => {
+    const t = s.trim()
+    if (/^\d+$/.test(t)) return parseInt(t, 10)
+    const cnMap: Record<string, number> = {
+      零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+    }
+    if (cnMap[t] !== undefined) return cnMap[t]
+    // 十/十几/几十/几十几
+    const m = t.match(/^(十|([一二三四五六七八九])十)?([一二三四五六七八九])?$/)
+    if (!m) return null
+    let tens = 0
+    if (m[1]) {
+      if (m[1] === '十') tens = 10
+      else if (m[2]) tens = cnMap[m[2]] * 10
+    }
+    const ones = m[3] ? cnMap[m[3]] : 0
+    const val = tens + ones
+    return val === 0 && t !== '零' ? null : val
+  }
 
-  if (secondsMatch) {
-    const secs = parseInt(secondsMatch[1], 10)
-    dueTimestamp = Date.now() + secs * 1000
-    text = text.replace(secondsMatch[0], '').trim()
-    timeFound = true
-  } else if (minutesMatch) {
-    const mins = parseInt(minutesMatch[1], 10)
-    dueTimestamp = Date.now() + mins * 60 * 1000
-    text = text.replace(minutesMatch[0], '').trim()
-    timeFound = true
-  } else if (hoursMatch) {
-    const hrs = parseInt(hoursMatch[1], 10)
-    dueTimestamp = Date.now() + hrs * 60 * 60 * 1000
-    text = text.replace(hoursMatch[0], '').trim()
-    timeFound = true
+  // 1. 相对时间：秒 / 分 / 时（支持阿拉伯数字与中文数字，如"10秒""十秒""十二分钟"）
+  const durationRe = /([0-9]+|[一二三四五六七八九十百]+)\s*(秒后?|s|sec|分钟后?|分后|m|min|小时后?|时后|h|hour)/i
+  const durationMatch = text.match(durationRe)
+
+  if (durationMatch) {
+    const numVal = cnNumToInt(durationMatch[1])
+    const unit = durationMatch[2].toLowerCase()
+    if (numVal !== null) {
+      const unitChar = unit.includes('秒') || unit === 's' || unit === 'sec' ? 's'
+        : (unit.includes('分') || unit === 'm' || unit === 'min') ? 'm'
+        : 'h'
+      const secs = numVal * (unitChar === 's' ? 1 : unitChar === 'm' ? 60 : 3600)
+      dueTimestamp = Date.now() + secs * 1000
+      text = text.replace(durationMatch[0], '').trim()
+      timeFound = true
+    }
   }
 
   // 2. 绝对时间：明天/今天/后天 + 时间点 (如 早上八点, 8点, 08:00)

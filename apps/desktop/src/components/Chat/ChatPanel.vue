@@ -10,7 +10,6 @@ const companion = useCompanionStore()
 const scrollRef = ref<HTMLElement | null>(null)
 const inputBarRef = ref<InstanceType<typeof InputBar> | null>(null)
 const showSkillPicker = ref(false)
-const emit = defineEmits<{ }>()
 
 /** 将流式文本包装为 ChatMessage 对象，复用 MessageBubble 的完整渲染（头像+泡泡+Markdown）。 */
 const streamingMsg = computed<ChatMessage | null>(() => {

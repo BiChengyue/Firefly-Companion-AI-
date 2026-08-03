@@ -74,6 +74,31 @@ _EMOTION_KEYWORDS: list[tuple[str, list[str]]] = [
 ]
 
 
+def _cn_num_to_int(s: str) -> int | None:
+    """中文数字转阿拉伯数字（支持 十/十二/二十/五/零 等常用表达），无法识别返回 None。"""
+    t = s.strip()
+    if not t:
+        return None
+    if t.isdigit():
+        return int(t)
+    cn_map = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if t in cn_map:
+        return cn_map[t]
+    # 十 / 十几 / 几十 / 几十几
+    m = re.match(r"^(十|([一二三四五六七八九])十)?([一二三四五六七八九])?$", t)
+    if not m:
+        return None
+    tens = 0
+    if m.group(1):
+        if m.group(1) == "十":
+            tens = 10
+        elif m.group(2):
+            tens = cn_map[m.group(2)] * 10
+    ones = cn_map[m.group(3)] if m.group(3) else 0
+    val = tens + ones
+    return None if val == 0 and t != "零" else val
+
+
 def parse_chinese_reminder_intent(text: str) -> dict | None:
     """从用户输入中智能捕获提醒意图与目标到期时间。
     例如: "流萤，提醒我明天早上八点告诉我该起床了"
@@ -88,20 +113,21 @@ def parse_chinese_reminder_intent(text: str) -> dict | None:
     target_dt = None
     clean_text = clean_raw
 
-    # 1. 相对时间：秒/分/时
-    sec_m = re.search(r"(\d+)\s*(秒后?|s|sec)", clean_raw)
-    min_m = re.search(r"(\d+)\s*(分钟后?|分后|m|min)", clean_raw)
-    hr_m = re.search(r"(\d+)\s*(小时后?|时后|h|hour)", clean_raw)
+    # 1. 相对时间：秒/分/时（支持阿拉伯数字与中文数字，如"10秒""十秒""十二分钟"）
+    duration_re = re.compile(r"([0-9]+|[一二三四五六七八九十百]+)\s*(秒后?|s|sec|分钟后?|分后|m|min|小时后?|时后|h|hour)", re.IGNORECASE)
+    duration_m = duration_re.search(clean_raw)
 
-    if sec_m:
-        target_dt = now + timedelta(seconds=int(sec_m.group(1)))
-        clean_text = clean_text.replace(sec_m.group(0), "")
-    elif min_m:
-        target_dt = now + timedelta(minutes=int(min_m.group(1)))
-        clean_text = clean_text.replace(min_m.group(0), "")
-    elif hr_m:
-        target_dt = now + timedelta(hours=int(hr_m.group(1)))
-        clean_text = clean_text.replace(hr_m.group(0), "")
+    if duration_m:
+        num_val = _cn_num_to_int(duration_m.group(1))
+        unit = duration_m.group(2).lower()
+        if num_val is not None:
+            if unit in ("秒后", "秒", "s", "sec"):
+                target_dt = now + timedelta(seconds=num_val)
+            elif unit in ("分后", "分钟后", "分", "m", "min"):
+                target_dt = now + timedelta(minutes=num_val)
+            else:
+                target_dt = now + timedelta(hours=num_val)
+            clean_text = clean_text.replace(duration_m.group(0), "")
 
     # 2. 绝对时间：明天/今天/后天 + 时间点
     if not target_dt:
@@ -157,6 +183,12 @@ def parse_chinese_reminder_intent(text: str) -> dict | None:
     timestamp_ms = int(target_dt.timestamp() * 1000)
     display_time = target_dt.strftime("%H:%M") if target_dt.day == now.day else target_dt.strftime("明天%H:%M")
 
+    return {
+        "text": f"{clean_text} ({display_time})",
+        "dueTimestamp": timestamp_ms
+    }
+
+
 def _resolve_meme_url(meme_path: str | None) -> str | None:
     """将表情包本地物理磁盘路径转换为前端可引用的 Web 相对 URL。"""
     if not meme_path:
@@ -167,21 +199,6 @@ def _resolve_meme_url(meme_path: str | None) -> str | None:
     if "/photo/" in p_str:
         return "/photo/" + p_str.split("/photo/")[-1]
     return meme_path
-
-
-# ── 智能提醒解析 ──────────────────────────────────
-    clean_text = re.sub(r"^(流萤[，,]*)?\s*(请)?(帮我)?(提醒我|提醒|定闹钟|叫醒)\s*", "", clean_text).strip()
-    clean_text = re.sub(r"^(告诉我|去|做)\s*", "", clean_text).strip()
-    if not clean_text:
-        clean_text = "定时提醒"
-
-    timestamp_ms = int(target_dt.timestamp() * 1000)
-    display_time = target_dt.strftime("%H:%M") if target_dt.day == now.day else target_dt.strftime("明天%H:%M")
-
-    return {
-        "text": f"{clean_text} ({display_time})",
-        "dueTimestamp": timestamp_ms
-    }
 
 _USER_EMOTION_HINTS: list[tuple[str, list[str]]] = [
     ("surprised", ["什么情况", "真的吗", "怎么会", "不是吧", "不会吧", "啊？"]),

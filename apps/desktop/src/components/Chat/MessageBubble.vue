@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { ChatMessage } from '@shared/index'
 import { useCompanionStore } from '@/stores/companion'
 import { marked } from 'marked'
@@ -102,10 +102,46 @@ function handleAvatarError(e: Event) {
     }
   }
 }
+
+// ── 右键菜单：删除单条消息 ──────────────────────────────
+const menuVisible = ref(false)
+const menuX = ref(0)
+const menuY = ref(0)
+const deleting = ref(false)
+
+function openMenu(e: MouseEvent) {
+  // 屏蔽左键/长按触发的 contextmenu（仅响应真实右键）
+  if (e.button !== 2 && !(e.ctrlKey && e.button === 0)) return
+  menuX.value = e.clientX
+  menuY.value = e.clientY
+  menuVisible.value = true
+}
+
+function closeMenu() {
+  menuVisible.value = false
+}
+
+async function onDeleteMessage() {
+  if (deleting.value) return
+  deleting.value = true
+  try {
+    await companion.deleteMessage(props.msg.id)
+    closeMenu()
+  } finally {
+    deleting.value = false
+  }
+}
+
+function onGlobalClick() {
+  closeMenu()
+}
+
+onMounted(() => document.addEventListener('click', onGlobalClick))
+onUnmounted(() => document.removeEventListener('click', onGlobalClick))
 </script>
 
 <template>
-  <div class="bubble-wrapper" :class="msg.role">
+  <div class="bubble-wrapper" :class="msg.role" @contextmenu.prevent="openMenu">
     <!-- 助手头像（左侧） -->
     <div v-if="msg.role === 'assistant'" class="avatar-col">
       <img :src="assistantAvatarSrc" class="avatar-img" alt="流萤" @error="handleAvatarError" />
@@ -268,6 +304,21 @@ function handleAvatarError(e: Event) {
   <Teleport to="body">
     <div v-if="memePreview" class="meme-overlay" @click="memePreview = false">
       <img :src="msg.meme!" class="meme-full" alt="表情预览" />
+    </div>
+  </Teleport>
+
+  <!-- 右键菜单：删除单条消息 -->
+  <Teleport to="body">
+    <div
+      v-if="menuVisible"
+      class="msg-context-menu"
+      :style="{ left: menuX + 'px', top: menuY + 'px' }"
+      @click.stop
+    >
+      <button class="cm-item cm-danger" :disabled="deleting" @click="onDeleteMessage">
+        <span class="cm-icon">🗑</span>
+        <span>{{ deleting ? '删除中…' : '删除该消息' }}</span>
+      </button>
     </div>
   </Teleport>
 </template>
@@ -985,5 +1036,75 @@ function handleAvatarError(e: Event) {
   margin-top: 4px;
   font-size: 10px;
   opacity: 0.8;
+}
+</style>
+
+<!-- 右键菜单样式（Teleport 到 body，需非 scoped） -->
+<style>
+.msg-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 150px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  animation: cm-pop 0.12s ease-out;
+  transform-origin: top left;
+}
+
+@keyframes cm-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.cm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #e5484d;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cm-item:hover {
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.cm-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cm-icon {
+  font-size: 14px;
+}
+
+/* 深色主题适配（ChatPanel 根节点有 .dark 时） */
+.dark .msg-context-menu {
+  background: rgba(32, 32, 36, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.dark .cm-item {
+  color: #ff6b6b;
+}
+
+.dark .cm-item:hover {
+  background: rgba(255, 107, 107, 0.12);
 }
 </style>
