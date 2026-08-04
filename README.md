@@ -350,7 +350,7 @@ GPT-SoVITS 本地语音合成是**可选的**，不配置也能正常使用对�
 ## 📂 项目结构
 
 ```
-firefly-companion/
+Firefly-Companion-AI-/
 ├── apps/
 │   ├── desktop/             # Tauri 2 + Vue 3 前端
 │   │   └── src/
