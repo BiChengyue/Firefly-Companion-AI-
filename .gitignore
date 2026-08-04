@@ -63,6 +63,11 @@ apps/desktop/vite.config.js
 apps/desktop/vite.config.d.ts
 resources/voice/gpt_sovits_engine/bin/
 
+# 大权重模型（托管于 GitHub Releases，通过 scripts/download_models.py 下载，不随仓库提交）
+data/onnx_model/
+resources/voice/firefly/gpt_weights/firefly-e50.ckpt
+resources/voice/firefly/sovits_weights/firefly_e10_s4420_l32.pth
+
 # Agent 工作区 / 临时研究产物（不提交）
 agent_workspace/
 
