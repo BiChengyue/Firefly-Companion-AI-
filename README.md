@@ -273,6 +273,16 @@ GPT-SoVITS 本地语音合成是**可选的**，不配置也能正常使用对�
 
 两脚本都会自动创建独立 Python 环境（约 3-5 GB，10-20 分钟）。
 
+**模型权重下载**：ONNX 语义模型（`data/onnx_model/model.onnx`）与流萤 TTS 权重（`firefly-e50.ckpt` / `firefly_e10_s4420_l32.pth`）体积较大，不随仓库分发，而是托管在 GitHub Releases。克隆后请先运行：
+
+```bash
+python scripts/download_models.py        # 自动下载缺失的模型到对应位置
+python scripts/download_models.py --force # 强制重新下载
+python scripts/download_models.py --file model.onnx  # 只下载某个文件
+```
+
+也可手动从 [Releases 页面](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 下载后放到对应目录。
+
 **手动配置**：如已有 GPT-SoVITS 整合包，在 **设置 → 语音** 面板中填入解释器路径即可（Windows 为 `整合包/env/Scripts/python.exe`，macOS / Linux 为 `整合包/env/bin/python`）。
 
 > **⚠️ ffmpeg 依赖说明**：GPT-SoVITS 语音合成依赖 **ffmpeg** 做音频处理，但该二进制文件**不随仓库提交**（体积大且为平台相关）。若你的系统未安装 ffmpeg：
