@@ -118,6 +118,7 @@
 | L0b | `facts.yaml` 确定性事实 | 73 条 | 关键词反向匹配，声明式答案 |
 | L0c | `firefly_lore.md` 亲历记忆 | 49 块 | 流萤个人经历与自我认知 |
 | L1 | `*_lore.md` 世界记忆 | 49 块 | 雅利洛/仙舟/翁法罗斯/二相乐园/黑塔空间站 |
+| L1~L2 | `resources/流萤/` 官方原文 | — | 主线剧情文本 / 角色游戏文本 / 官方视频文本（角色原文素材，构建索引入库） |
 | L2-4 | `resources/hsrchat/` wiki 兜底 | 6294 块 | 全量剧情/角色/NPC 对话 |
 
 **防幻觉机制：**
@@ -130,6 +131,21 @@
 **覆盖范围：** 翁法罗斯 12 黄金裔（含全名别名）、仙舟核心角色（藿藿/桂乃芬/呼雷等）、雅利洛-VI（可可利亚/杰帕德/虎克等）、二相乐园（归寂/隆介/斯科特等）、星穹列车全席（帕姆/三月七等）
 
 **构建工具：** `python apps/server/scripts/build_lore_index.py --force --no-vectors` 一键重建 6717 块索引
+
+**📁 角色素材库 `resources/流萤/`（L1~L2 官方原文）：**
+
+该目录是流萤**角色文本的原始素材库**，由 `build_lore_index.py` 在构建索引时解析入库：
+
+```
+resources/流萤/
+├── 主线剧情文本/      # 官方主线剧情（22 个 .md），category: story_main_official
+├── 角色游戏文本/      # 角色故事 1-4 / 角色语音.md / 短信/，category: character_story_official 等
+└── 官方视频文本/      # PV 剧本 / 对话，category: story_video_official
+```
+
+- **使用方式**：运行 `python apps/server/scripts/build_lore_index.py` 时，`build_lore_index.py` 会自动读取 `resources/流萤/` 下的三个子目录，解析为剧情块并写入 `data/lore_index.db`（FTS5 全文索引 + 向量）。运行时由 `hsr_lore.py` 懒加载该索引做召回。
+- **首次使用前必须构建**：若 `data/lore_index.db` 不存在，`hsr_lore.py` 会提示"请运行 scripts/build_lore_index.py"，此时 `resources/流萤/` 的素材尚未生效。
+- **与 `resources/hsrchat/` 的区别**：`hsrchat/` 是第三方 wiki 兜底（L2-4 全量剧情），`流萤/` 是**官方原文精选**（L1~L2 优先注入），优先级更高。
 
 ### 🔧 大模型灵活接入
 
@@ -173,8 +189,8 @@
 ### 第一步：克隆项目
 
 ```bash
-git clone https://github.com/<your-org>/firefly-companion.git
-cd firefly-companion
+git clone https://github.com/hhjk21/Firefly-Companion-AI-.git
+cd Firefly-Companion-AI-
 ```
 
 ### 第二步：安装系统依赖
