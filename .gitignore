@@ -9,8 +9,13 @@ dist/
 target/
 apps/desktop/src-tauri/target/
 
-# 运行时数据（向量库/对话/日志）
-data/
+# 运行时数据（向量库/对话/日志）—— data/knowledge 与 data/skills 为源码资源，需提交
+# 说明：以下无前导斜杠的模式匹配任意层级（根目录 data/ 与 apps/server/data/ 等）
+audio_cache/
+onnx_model/
+app.db*
+lore_index.db
+hsr_index.json
 server.log
 
 # 本地配置（含密钥，不要提交）
