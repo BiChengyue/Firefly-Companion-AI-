@@ -275,6 +275,11 @@ GPT-SoVITS 本地语音合成是**可选的**，不配置也能正常使用对�
 
 **手动配置**：如已有 GPT-SoVITS 整合包，在 **设置 → 语音** 面板中填入解释器路径即可（Windows 为 `整合包/env/Scripts/python.exe`，macOS / Linux 为 `整合包/env/bin/python`）。
 
+> **⚠️ ffmpeg 依赖说明**：GPT-SoVITS 语音合成依赖 **ffmpeg** 做音频处理，但该二进制文件**不随仓库提交**（体积大且为平台相关）。若你的系统未安装 ffmpeg：
+> - **Windows**：从 [ffmpeg.org](https://ffmpeg.org/download.html) 或 GPT-SoVITS 整合包获取 `ffmpeg.exe` 与 `ffprobe.exe`，放入 `resources/voice/gpt_sovits_engine/bin/` 目录（引擎启动时会自动检测并加载）；
+> - **macOS / Linux**：用包管理器安装，如 `brew install ffmpeg` / `sudo apt install ffmpeg`。
+> 已安装 ffmpeg 的用户可跳过此步（引擎会自动从系统 PATH 调用）。
+
 **推理加速说明：**
 - **Windows / Linux（NVIDIA）**：自动启用 CUDA 推理，延迟从 CPU 的 30-60s 降至 ~0.3s。
 - **macOS（Apple Silicon）**：通过 MPS 加速（实验性，GPT-SoVITS 官方未正式支持 macOS）。
