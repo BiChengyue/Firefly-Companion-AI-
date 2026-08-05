@@ -3,10 +3,24 @@ import { inject } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useCompanionStore } from '@/stores/companion'
 import { useSettingsForm } from '@/composables/useSettingsForm'
+import { photoUrl } from '@/services/api'
 
 const companion = useCompanionStore()
 const settings = useSettingsStore()
 const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
+
+// 判断某张头像是否为当前分类正在显示的头像（用于高亮选中态）
+function isCurrentAvatar(category: 'daily' | 'work', filename: string): boolean {
+  const list = category === 'work' ? companion.workAvatars : companion.dailyAvatars
+  const idx = category === 'work' ? companion.avatarIndexWork : companion.avatarIndexDaily
+  if (!list.length) return false
+  return list[Math.abs(idx) % list.length] === photoUrl(filename)
+}
+
+// 点击缩略图即设为当前显示头像
+function selectAvatar(category: 'daily' | 'work', filename: string) {
+  companion.selectAvatar(category, filename)
+}
 </script>
 
 <template>
@@ -118,7 +132,7 @@ const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
     <div class="avatar-mgmt-section">
       <span class="toggle-label">🖼️ 角色头像管理</span>
       <span class="toggle-desc" style="margin-bottom: 8px;">
-        添加或删除流萤的聊天头像（聊天页面右侧显示的图片）
+        添加或删除流萤的聊天头像，点击缩略图可设为当前显示的头像（聊天页面右侧显示）
       </span>
       <p v-if="form.avatarMsg.value" class="ext-action-msg" :class="{ error: form.avatarMsg.value.startsWith('❌') }" style="margin-bottom: 4px;">
         {{ form.avatarMsg.value }}
@@ -130,9 +144,11 @@ const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
           <button class="ext-sm-btn primary" :disabled="form.avatarUploading.value" @click="form.handleAvatarUpload('daily')">＋ 添加</button>
         </div>
         <div v-if="form.dailyAvatarList.value.length" class="avatar-grid">
-          <div v-for="av in form.dailyAvatarList.value" :key="av.filename" class="avatar-item">
-            <img :src="`/photo/${av.filename}`" class="avatar-thumb" :alt="av.filename" />
-            <button class="avatar-del-btn" title="删除此头像" @click="form.handleAvatarDelete('daily', av.filename)">×</button>
+          <div v-for="av in form.dailyAvatarList.value" :key="av.filename"
+               class="avatar-item" :class="{ 'avatar-selected': isCurrentAvatar('daily', av.filename) }"
+               @click="selectAvatar('daily', av.filename)" title="点击设为当前头像">
+            <img :src="photoUrl(av.filename)" class="avatar-thumb" :alt="av.filename" />
+            <button class="avatar-del-btn" title="删除此头像" @click.stop="form.handleAvatarDelete('daily', av.filename)">×</button>
           </div>
         </div>
         <div v-else-if="form.avatarLoading.value" class="ext-hint">加载中…</div>
@@ -145,9 +161,11 @@ const form = inject<ReturnType<typeof useSettingsForm>>('settingsForm')!
           <button class="ext-sm-btn primary" :disabled="form.avatarUploading.value" @click="form.handleAvatarUpload('work')">＋ 添加</button>
         </div>
         <div v-if="form.workAvatarList.value.length" class="avatar-grid">
-          <div v-for="av in form.workAvatarList.value" :key="av.filename" class="avatar-item">
-            <img :src="`/photo/${av.filename}`" class="avatar-thumb" :alt="av.filename" />
-            <button class="avatar-del-btn" title="删除此头像" @click="form.handleAvatarDelete('work', av.filename)">×</button>
+          <div v-for="av in form.workAvatarList.value" :key="av.filename"
+               class="avatar-item" :class="{ 'avatar-selected': isCurrentAvatar('work', av.filename) }"
+               @click="selectAvatar('work', av.filename)" title="点击设为当前头像">
+            <img :src="photoUrl(av.filename)" class="avatar-thumb" :alt="av.filename" />
+            <button class="avatar-del-btn" title="删除此头像" @click.stop="form.handleAvatarDelete('work', av.filename)">×</button>
           </div>
         </div>
         <div v-else-if="form.avatarLoading.value" class="ext-hint">加载中…</div>

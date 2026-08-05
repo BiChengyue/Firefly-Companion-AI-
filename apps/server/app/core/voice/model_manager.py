@@ -20,18 +20,17 @@ from typing import AsyncGenerator, List, Optional
 
 import httpx
 
+from app.core import paths as _paths
+
 logger = logging.getLogger(__name__)
 
 # ── 路径定义 ────────────────────────────────────────────────────────────────
-# model_manager.py 位于 apps/server/app/core/voice/
-# 往上 6 层到项目根
-PROJECT_ROOT = Path(__file__).resolve().parents[5]
 
 # 流萤专属权重目录（Git LFS 管理，随仓库分发）
-FIREFLY_DIR = PROJECT_ROOT / "resources" / "voice" / "firefly"
+FIREFLY_DIR = _paths.FIREFLY_VOICE_DIR
 
 # GPT-SoVITS 推理引擎目录
-ENGINE_DIR = PROJECT_ROOT / "resources" / "voice" / "gpt_sovits_engine"
+ENGINE_DIR = _paths.GPT_SOVITS_ENGINE_DIR
 
 
 def get_engine_dir() -> Path:

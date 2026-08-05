@@ -3,9 +3,12 @@
 前端通过 GET /api/providers 自动发现已注册的 Provider。
 """
 import importlib
+import logging
 import pkgutil
 
 from app.core.llm.base import BaseLLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProviderRegistry:
@@ -51,12 +54,32 @@ register_provider = LLMProviderRegistry.register
 
 
 def load_builtin_providers():
-    """启动时动态导入内置 Provider 模块，触发 @register_provider 注册。"""
+    """启动时动态导入内置 Provider 模块，触发 @register_provider 注册。
+
+    注意：PyInstaller 打包后 pkgutil.iter_modules() 无法枚举 PYZ 归档内的模块，
+    因此先显式导入内置 Provider 模块列表，再回退到目录扫描（开发模式）。
+    """
+    # 显式列出的内置 Provider 模块（PyInstaller 下保证能被注册）
+    _BUILTIN_PROVIDER_MODULES = [
+        "app.core.llm.providers.openai_compat",
+    ]
+    for _mod in _BUILTIN_PROVIDER_MODULES:
+        try:
+            importlib.import_module(_mod)
+        except ImportError:
+            pass
+
+    # 回退：目录扫描（开发模式，新增 Provider 文件自动发现）
     try:
         from app.core.llm import providers as _providers_pkg
         for module_info in pkgutil.iter_modules(_providers_pkg.__path__):
             if module_info.name.startswith("_"):
                 continue
-            importlib.import_module(f"app.core.llm.providers.{module_info.name}")
+            module_path = f"app.core.llm.providers.{module_info.name}"
+            if module_path not in _BUILTIN_PROVIDER_MODULES:
+                importlib.import_module(module_path)
     except ImportError:
         pass  # providers 包尚不存在
+
+    # 诊断日志：确认注册结果（PyInstaller 下 pkgutil 扫描失效，借此确认显式导入生效）
+    logger.info("LLM Provider 注册完成: %s", list(LLMProviderRegistry._providers.keys()))

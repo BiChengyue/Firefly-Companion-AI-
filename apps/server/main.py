@@ -4,6 +4,7 @@
 """
 from contextlib import asynccontextmanager
 from pathlib import Path
+import os
 import traceback
 
 from fastapi import FastAPI, Request
@@ -18,6 +19,7 @@ from app.api.diagnose import router as diagnose_router
 from app.api.health import router as health_router
 from app.api.mcp import router as mcp_router
 from app.api.memories import router as memories_router
+from app.api.models import router as models_router
 from app.api.mode import router as mode_router
 from app.api.sessions import router as sessions_router
 from app.api.system import router as system_router
@@ -36,6 +38,10 @@ logger = get_logger()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """应用生命周期：启动时加载 Provider / 工具 / 人设。"""
+    # 初始化可写数据目录（含打包模式下 GPT-SoVITS 引擎代码从资源根复制）
+    from app.core import paths as _paths
+    _paths.ensure_data_dirs()
+
     # 动态加载内置 LLM Provider — 对应 spec 3.3.1
     from app.core.llm.registry import load_builtin_providers
     load_builtin_providers()
@@ -57,22 +63,41 @@ async def lifespan(_app: FastAPI):
     except Exception as e:
         logger.warning("MCP 自动连接异常（不影响启动）: %s", e)
 
-    # 后台预热剧情索引 + 记忆 Embedding + ONNX 语义引擎（export=False 快路径）
+    # 后台预热剧情索引（export=False 快路径）
     try:
         from app.core.hsr_lore import start_lore_model_preload
         start_lore_model_preload()
     except Exception as e:
         logger.warning("lore 模型预热跳过: %s", e)
 
+    # 后台预热记忆 Embedding / ONNX 语义引擎。
+    # ONNX 首次加载需 3-10 秒：放到线程池中执行不阻塞启动，同时保证用户首次
+    # 发消息时记忆召回 1.5s 熔断不会因引擎首次初始化而超时跳过。
+    try:
+        import asyncio
+        from app.core.memory.embedding import get_embedding_engine
+
+        async def _bg_warm_embedding():
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(None, get_embedding_engine)
+                logger.info("记忆 Embedding 语义引擎预热完成")
+            except Exception as e_em:
+                logger.warning("记忆 Embedding 引擎预热跳过: %s", e_em)
+
+        asyncio.create_task(_bg_warm_embedding())
+    except Exception as e:
+        logger.warning("记忆 Embedding 预热任务创建失败: %s", e)
+
     # 预热角色人设、剧情 Query Normalizer 与 TTS 语音服务引擎
     try:
         from app.core.persona.loader import load_persona
         from app.core.hsr_lore import _get_normalizer
         from app.core.voice.tts import get_tts_service
-        load_persona("firefly")
+        load_persona()  # 不传参：从统一 CONFIG_DIR 加载默认人设 firefly.yaml
         _get_normalizer()
         get_tts_service()
-        logger.info("角色人设、Normalizer 与 TTS 语音引擎预热完成 ✓")
+        logger.info("角色人设、Normalizer 与 TTS 语音引擎预热完成")
     except Exception as e_ps:
         logger.warning("人设与 TTS 服务预热跳过: %s", e_ps)
 
@@ -160,12 +185,14 @@ app.include_router(workspaces_router)
 app.include_router(voice_router)
 app.include_router(weather_router)
 app.include_router(mcp_router)
+app.include_router(models_router)
 app.include_router(tools_router)
 
 # 静态文件服务 — 内置表情包与用户自定义表情包
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_BUILTIN_MEMES = _PROJECT_ROOT / "resources" / "memes"
-_USER_MEMES = _PROJECT_ROOT / "data" / "memes"
+from app.core import paths as _paths
+
+_BUILTIN_MEMES = _paths.BUILTIN_MEMES_DIR
+_USER_MEMES = _paths.USER_MEMES_DIR
 
 if _BUILTIN_MEMES.exists():
     app.mount("/memes", StaticFiles(directory=str(_BUILTIN_MEMES)), name="memes")
@@ -173,13 +200,12 @@ if _USER_MEMES.exists():
     app.mount("/user-memes", StaticFiles(directory=str(_USER_MEMES)), name="user-memes")
 
 # Live2D 模型资源静态挂载 — pixi-live2d-display 通过 HTTP 加载模型文件
-# _PROJECT_ROOT 是 apps/，live2d 资源在项目根 resources/ 下
-_LIVE2D_ROOT = Path(__file__).resolve().parent.parent.parent / "resources" / "live2d"
+_LIVE2D_ROOT = _paths.LIVE2D_DIR
 if _LIVE2D_ROOT.exists():
     app.mount("/static/live2d", StaticFiles(directory=str(_LIVE2D_ROOT)), name="live2d-static")
 
 # 头像静态资源挂载 — 管理与展示用户头像
-_PHOTO_DIR = Path(__file__).resolve().parent.parent / "desktop" / "public" / "photo"
+_PHOTO_DIR = _paths.PHOTO_DIR
 if _PHOTO_DIR.exists():
     app.mount("/photo", StaticFiles(directory=str(_PHOTO_DIR)), name="photo")
 
@@ -206,7 +232,7 @@ def list_providers() -> dict:
     import logging
     _log = logging.getLogger("providers")
     result: list[dict] = []
-    providers_path = Path(__file__).resolve().parent.parent / "config" / "providers" / "providers.yaml"
+    providers_path = _paths.CONFIG_DIR / "providers" / "providers.yaml"
     # ── 内置兜底列表（与 providers.yaml 保持同步）───────────
     _builtin = [
         {"id": "deepseek", "name": "DeepSeek", "baseUrl": "https://api.deepseek.com/v1",
@@ -312,4 +338,6 @@ def reload_memes() -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    # 端口可通过环境变量 PORT 覆盖（sidecar 启动时注入），默认 8765
+    port = int(os.environ.get("PORT", "8765"))
+    uvicorn.run(app, host="127.0.0.1", port=port)

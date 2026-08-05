@@ -15,7 +15,6 @@
 
 ## ✨ 核心功能
 
-> 以下内容面向开发者 / 贡献者，介绍底层实现与设计。普通用户可跳过本区。
 
 ### 🎭 日常 / 萨姆 双模式
 
@@ -347,7 +346,7 @@ python scripts/download_models.py --file model.onnx  # 只下载某个文件
 
 ### 表情包与图片
 
-`resources/memes/` 中的表情包与 `resources/avatar/`、`resources/photo/` 中的图片素材部分来源于网络收集，部分由 AI 生成，仅供个人学习交流使用。
+`resources/memes/` 中的表情包与 `resources/photo/` 中的图片素材部分来源于网络收集，部分由 AI 生成，仅供个人学习交流使用。
 
 ### 语音模型
 

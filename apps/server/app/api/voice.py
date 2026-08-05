@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -184,9 +185,8 @@ async def open_engine_dir():
 async def serve_voice_file(filename: str):
     """提供缓存的语音文件。若文件尚不存在（正在生成中），轮询等待最多 30 秒。
     此设计实现预连接优化：前端提前发起请求，TTS 完成后立即开始流式传输。"""
-    from pathlib import Path
-    BASE = Path(__file__).resolve().parents[4]  # project root
-    cache_dir = BASE / "data" / "audio_cache"
+    from app.core import paths as _paths
+    cache_dir = _paths.AUDIO_CACHE_DIR
     
     # 提取无后缀的文件基本名，支持不管是 .wav 还是 .mp3 请求，均能找到实际生成的文件
     p = Path(filename)

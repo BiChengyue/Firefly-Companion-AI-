@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core import paths
+
 
 class LLMConfig(BaseModel):
     """LLM 提供商配置，支持 JSON camelCase 字段（api_key ↔ apiKey 等）。"""
@@ -81,7 +83,7 @@ class MemoryConfig(BaseModel):
     decay_factor: float = Field(default=0.95, alias="decayFactor")  # 时间衰减因子
     decay_threshold: float = Field(default=0.30, alias="decayThreshold")  # 有效置信度低于此值的记忆不再注入 Prompt
     embedding_engine: str = Field(default="hash", alias="embeddingEngine")  # hash / onnx
-    onnx_model_path: str = Field(default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", alias="onnxModelPath")
+    onnx_model_path: str = Field(default="data/onnx_model", alias="onnxModelPath")
 
 
 class Live2DConfig(BaseModel):
@@ -226,7 +228,7 @@ def _deep_merge(base: dict, override: dict) -> None:
 
 @lru_cache
 def get_settings() -> Settings:
-    base_dir = Path(__file__).resolve().parents[3] / "config"
+    base_dir = paths.CONFIG_DIR
     data: dict = {}
     default_path = base_dir / "default.json"
     if default_path.exists():

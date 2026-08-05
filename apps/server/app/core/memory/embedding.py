@@ -13,6 +13,7 @@ import os
 import re
 import struct
 import logging
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -153,12 +154,18 @@ class OnnxEmbeddingEngine:
             model_path = os.path.join(self._model_name, "model.onnx")
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"ONNX 模型文件不存在: {model_path}")
+            # 大小校验：防止 0 字节 / 下载中断的残骸被误加载（真实模型 >400MB）
+            if os.path.getsize(model_path) < 64 * 1024 * 1024:
+                raise FileNotFoundError(
+                    f"model.onnx 大小异常（疑似不完整下载）: {os.path.getsize(model_path)} bytes")
 
             self._session = ort.InferenceSession(
                 model_path,
                 providers=["CPUExecutionProvider"],
             )
-            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+            # local_files_only=True：绝不联网下载，缺文件直接报错（上层回退 hash 引擎）。
+            # 之前未加此参数，目录缺文件时会尝试访问 HuggingFace 在线拉取而长时间卡住。
+            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, local_files_only=True)
             self._model = True  # 标记已加载
             logger.info("[ONNX] 模型加载完成 (onnxruntime 原生模式)")
         except ImportError as e:
@@ -256,6 +263,30 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
 _engine_instance: Optional[LocalEmbeddingEngine | OnnxEmbeddingEngine] = None
 _engine_type_loaded: Optional[str] = None
 
+# ONNX 模型文件完整性最小阈值（防占位/残骸误判为有效）
+_MIN_ONNX_MODEL_BYTES = 64 * 1024 * 1024  # model.onnx 至少 64MB
+
+
+def onnx_files_ready(model_dir: str) -> bool:
+    """判断 ONNX 模型目录是否已包含完整可用文件。
+
+    要求 model.onnx ≥ 64MB 且 tokenizer.json / tokenizer_config.json 均 ≥ 256B。
+    用于启动时自动检测：模型下载完即自动启用 ONNX 真语义引擎，缺失时回退 hash。
+    """
+    try:
+        d = Path(model_dir)
+        for name, min_size in (
+            ("model.onnx", _MIN_ONNX_MODEL_BYTES),
+            ("tokenizer.json", 256),
+            ("tokenizer_config.json", 256),
+        ):
+            p = d / name
+            if not p.exists() or p.stat().st_size < min_size:
+                return False
+        return True
+    except OSError:
+        return False
+
 
 def create_embedding_engine(
     engine_type: str = "hash",
@@ -296,14 +327,19 @@ def get_embedding_engine() -> LocalEmbeddingEngine | OnnxEmbeddingEngine:
         settings = get_settings()
         engine_type = getattr(settings.memory, "embedding_engine", "hash")
         onnx_path = getattr(settings.memory, "onnx_model_path", DEFAULT_ONNX_MODEL)
-        # 若配置的是相对路径（如 data/onnx_model），从项目根解析
+        # 若配置的是相对路径（如 data/onnx_model），从数据根解析
         if onnx_path and not onnx_path.startswith(("sentence-transformers/", "/", "\\")) and ":" not in onnx_path:
-            import os as _os
-            _project_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", ".."))
-            onnx_path = _os.path.join(_project_root, onnx_path)
+            from app.core import paths as _paths
+            onnx_path = str(_paths.ROOT / onnx_path)
     except Exception:
         engine_type = "hash"
         onnx_path = DEFAULT_ONNX_MODEL
+
+    # 自动升级：ONNX 模型文件已下载完整时，即使配置为 hash（默认值）也自动启用
+    # 真语义引擎，让用户下载完模型后无需任何手动配置即生效。
+    if engine_type != "onnx" and onnx_files_ready(onnx_path):
+        logger.info("[Embedding] 检测到完整 ONNX 模型文件，自动启用 ONNX 真语义引擎")
+        engine_type = "onnx"
 
     if engine_type == "onnx":
         try:

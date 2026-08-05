@@ -625,15 +625,19 @@ async function renameSession(id: string, title: string) {
   const workAvatars = ref<string[]>([])
   const avatarsLoaded = ref(false)
 
+  // 与 apps/desktop/public/photo（打包后 FIREFLY_ROOT/public/photo）实际文件保持一致，
+  // 仅作为后端未就绪时的离线兜底，不含已不存在的 daily6/daily9 等旧版文件
   const DEFAULT_DAILY_FALLBACK = [
-    '/photo/daily1.jpeg', '/photo/daily2.jpg', '/photo/daily3.png', '/photo/daily4.jpeg',
-    '/photo/daily5.jpg', '/photo/daily6.jpeg', '/photo/daily7.jpeg', '/photo/daily8.jpeg',
-    '/photo/daily9.jpeg', '/photo/daily10.png'
-  ]
+    'daily1.jpeg', 'daily2.jpg', 'daily3.png', 'daily4.jpeg',
+    'daily5.jpg', 'daily7.jpeg', 'daily8.jpeg', 'daily10.png',
+    'daily11.png', 'daily12.png', 'daily13.png', 'daily17.jpeg',
+    'daily18.png', 'daily19.png', 'daily20.png', 'daily21.jpeg',
+    'daily22.jpeg'
+  ].map(api.photoUrl)
   const DEFAULT_WORK_FALLBACK = [
-    '/photo/work1.png', '/photo/work2.jpg', '/photo/work3.png', '/photo/work4.png',
-    '/photo/work5.png', '/photo/work6.jpg', '/photo/work7.png'
-  ]
+    'work1.png', 'work2.jpg', 'work3.png', 'work4.png',
+    'work5.png', 'work6.jpg', 'work7.png'
+  ].map(api.photoUrl)
 
   /** 保存当前选中状态（同时写盘索引数字与特定文件名） */
   function saveCurrentAvatarState() {
@@ -670,18 +674,18 @@ async function renameSession(id: string, title: string) {
         api.getAvatars('work'),
       ])
       if (dailyRes.avatars && dailyRes.avatars.length > 0) {
-        dailyAvatars.value = dailyRes.avatars.map(a => `/photo/${a.filename}`)
-        localStorage.setItem('firefly_daily_avatars_cache', JSON.stringify(dailyAvatars.value))
+        dailyAvatars.value = dailyRes.avatars.map(a => api.photoUrl(a.filename))
+        localStorage.setItem('firefly_daily_avatars_cache_v2', JSON.stringify(dailyAvatars.value))
       }
       if (workRes.avatars && workRes.avatars.length > 0) {
-        workAvatars.value = workRes.avatars.map(a => `/photo/${a.filename}`)
-        localStorage.setItem('firefly_work_avatars_cache', JSON.stringify(workAvatars.value))
+        workAvatars.value = workRes.avatars.map(a => api.photoUrl(a.filename))
+        localStorage.setItem('firefly_work_avatars_cache_v2', JSON.stringify(workAvatars.value))
       }
       avatarsLoaded.value = true
     } catch {
       // 1. 优先读取上一次成功的离线真实全量缓存
-      const cachedDaily = localStorage.getItem('firefly_daily_avatars_cache')
-      const cachedWork = localStorage.getItem('firefly_work_avatars_cache')
+      const cachedDaily = localStorage.getItem('firefly_daily_avatars_cache_v2')
+      const cachedWork = localStorage.getItem('firefly_work_avatars_cache_v2')
       if (cachedDaily && cachedWork) {
         try {
           dailyAvatars.value = JSON.parse(cachedDaily)
@@ -718,7 +722,7 @@ async function renameSession(id: string, title: string) {
   function getCurrentAvatar(): string {
     const list = getAvatarList()
     const index = isWork.value ? avatarIndexWork.value : avatarIndexDaily.value
-    return list[Math.abs(index) % list.length] || '/photo/avatar.png'
+    return list[Math.abs(index) % list.length] || api.photoUrl('avatar.png')
   }
 
   /** 直接选择特定图像 */
@@ -763,6 +767,13 @@ async function renameSession(id: string, title: string) {
     if (!badUrl) return
     dailyAvatars.value = dailyAvatars.value.filter(u => u !== badUrl)
     workAvatars.value = workAvatars.value.filter(u => u !== badUrl)
+    // 剔除后同步修正索引：若当前索引越界则回绕到有效范围，避免"当前头像"与列表错位
+    if (dailyAvatars.value.length > 0 && avatarIndexDaily.value >= dailyAvatars.value.length) {
+      avatarIndexDaily.value = avatarIndexDaily.value % dailyAvatars.value.length
+    }
+    if (workAvatars.value.length > 0 && avatarIndexWork.value >= workAvatars.value.length) {
+      avatarIndexWork.value = avatarIndexWork.value % workAvatars.value.length
+    }
   }
 
   /** 刷新头像列表（上传/删除后调用） */

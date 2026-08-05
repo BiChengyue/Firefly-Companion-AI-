@@ -71,3 +71,9 @@ resources/voice/firefly/sovits_weights/firefly_e10_s4420_l32.pth
 # Agent 工作区 / 临时研究产物（不提交）
 agent_workspace/
 
+# PyInstaller 打包输出与 Tauri sidecar 二进制（构建产物，不提交）
+apps/server/build/
+apps/desktop/src-tauri/binaries/
+FireflyCompanion_*_setup.exe
+FireflyCompanion_*_x64-setup.exe
+

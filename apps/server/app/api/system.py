@@ -67,7 +67,8 @@ def recursive_update(d: dict, u: dict) -> dict:
 
 @router.post("/api/config")
 async def update_config(body: dict) -> dict:
-    config_path = Path(__file__).resolve().parents[4] / "config" / "default.json"
+    from app.core import paths as _paths
+    config_path = _paths.CONFIG_DIR / "default.json"
     if not config_path.exists():
         raise HTTPException(status_code=500, detail="配置文件不存在")
     current = json.loads(config_path.read_text(encoding="utf-8"))
@@ -94,7 +95,7 @@ async def update_config(body: dict) -> dict:
 
     # 方案A：同步写入/清空 default.local.json（优先级高于 default.json 的本地覆盖层）。
     # 否则前端"删除/修改 API Key"只写到 default.json，会被 local.json 里的旧值覆盖，导致删除无效。
-    local_path = Path(__file__).resolve().parents[4] / "config" / "default.local.json"
+    local_path = _paths.CONFIG_DIR / "default.local.json"
     if local_path.exists():
         try:
             local_current = json.loads(local_path.read_text(encoding="utf-8"))

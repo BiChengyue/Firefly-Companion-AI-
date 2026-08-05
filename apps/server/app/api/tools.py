@@ -99,7 +99,8 @@ async def import_skill(body: ImportSkillBody):
     from pathlib import Path
 
     # 用 temp 文件让 scanner 的 import_skill_md 读取
-    tmp_dir = Path(__file__).resolve().parents[4] / "data" / "skills"
+    from app.core import paths as _paths
+    tmp_dir = _paths.SKILLS_DIR
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     # 直接解析 frontmatter 获取 name

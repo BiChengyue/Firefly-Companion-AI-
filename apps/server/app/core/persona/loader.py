@@ -75,9 +75,9 @@ class PersonaConfig:
 def load_persona(persona_path: str | None = None) -> PersonaConfig:
     """加载人设 YAML。"""
     if persona_path is None:
-        # app/core/persona/loader.py → parents[5] = 项目根
+        from app.core import paths as _paths
         persona_path = str(
-            Path(__file__).resolve().parents[5] / "config" / "persona" / "firefly.yaml"
+            _paths.CONFIG_DIR / "persona" / "firefly.yaml"
         )
     path = Path(persona_path)
     if not path.exists():

@@ -524,7 +524,8 @@ def delete_file(path: str) -> str:
 def _get_search_cache(cache_key: str, ttl_seconds: int = 86400) -> str | None:
     """读取 SQLite 独立 search_cache 缓存表。"""
     import os, sqlite3, time
-    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "app.db")
+    from app.core import paths as _paths
+    db_path = str(_paths.DATA_DIR / "app.db")
     if not os.path.exists(os.path.dirname(db_path)):
         return None
     try:
@@ -546,7 +547,8 @@ def _get_search_cache(cache_key: str, ttl_seconds: int = 86400) -> str | None:
 def _set_search_cache(cache_key: str, content: str) -> None:
     """写入 SQLite 独立 search_cache 缓存表，保持最多 200 条记录。"""
     import os, sqlite3, time
-    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "app.db")
+    from app.core import paths as _paths
+    db_path = str(_paths.DATA_DIR / "app.db")
     try:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         conn = sqlite3.connect(db_path)

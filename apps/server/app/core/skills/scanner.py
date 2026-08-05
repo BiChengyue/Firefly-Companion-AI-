@@ -11,8 +11,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]  # → apps/server/
-_SKILLS_DIR = _PROJECT_ROOT.parent / "apps" / "data" / "skills"
+from app.core import paths as _paths
+_SKILLS_DIR = _paths.SKILLS_DIR
 _SKILLMD_PATTERN = "SKILL.md"
 
 

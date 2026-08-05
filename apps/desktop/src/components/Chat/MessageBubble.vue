@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { ChatMessage } from '@shared/index'
 import { useCompanionStore } from '@/stores/companion'
+import { photoUrl } from '@/services/api'
 import { marked } from 'marked'
 
 // 配置 marked：去掉可能产生 XSS 的选项
@@ -97,8 +98,8 @@ function handleAvatarError(e: Event) {
     if (currentSrc) {
       companion.markAvatarFailed(currentSrc)
     }
-    if (!target.src.endsWith('/photo/avatar.png')) {
-      target.src = '/photo/avatar.png'
+    if (!target.src.endsWith(photoUrl('avatar.png'))) {
+      target.src = photoUrl('avatar.png')
     }
   }
 }
@@ -199,7 +200,7 @@ onUnmounted(() => document.removeEventListener('click', onGlobalClick))
 
     <!-- 用户头像（右侧） -->
     <div v-if="msg.role === 'user'" class="avatar-col">
-      <img src="/photo/user.png" class="avatar-img user-avatar-style" alt="用户" />
+      <img :src="photoUrl('user.png')" class="avatar-img user-avatar-style" alt="用户" />
     </div>
 
     <!-- CodeBuddy 风格 Token 明细面板 -->

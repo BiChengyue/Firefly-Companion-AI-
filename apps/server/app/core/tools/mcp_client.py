@@ -19,11 +19,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# 项目根路径
-_PROJECT_ROOT = Path(__file__).resolve().parents[5]
+# 数据根路径
+from app.core import paths as _paths
 # 标准 mcp.json 位置（对齐 CodeBuddy/WorkBuddy）
 _USER_MCP_CONFIG = Path.home() / ".firefly" / "mcp.json"       # 用户级全局
-_PROJECT_MCP_CONFIG = _PROJECT_ROOT / "mcp.json"                # 项目级
+_PROJECT_MCP_CONFIG = _paths.ROOT / "mcp.json"                  # 项目级
 
 # ── 数据模型 ───────────────────────────────────────────
 

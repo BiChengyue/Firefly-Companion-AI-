@@ -14,10 +14,10 @@ import random
 from pathlib import Path
 from typing import Optional
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
+from app.core import paths as _paths
 
-BUILTIN_MEMES_DIR = _PROJECT_ROOT / "resources" / "memes"
-USER_MEMES_DIR = _PROJECT_ROOT / "data" / "memes"
+BUILTIN_MEMES_DIR = _paths.BUILTIN_MEMES_DIR
+USER_MEMES_DIR = _paths.USER_MEMES_DIR
 
 _VALID_EXTENSIONS = {".png", ".gif", ".jpg", ".jpeg", ".webp", ".apng"}
 VALID_EMOTIONS = frozenset({"happy", "sad", "angry", "shy", "thinking", "surprised", "neutral", "work"})

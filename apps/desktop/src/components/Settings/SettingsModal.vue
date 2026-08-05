@@ -271,8 +271,10 @@ function handleCancel() {
 .avatar-cat-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .avatar-cat-label { font-size: 13px; font-weight: 600; }
 .avatar-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.avatar-item { position: relative; width: 52px; height: 52px; }
+.avatar-item { position: relative; width: 52px; height: 52px; cursor: pointer; }
 .avatar-thumb { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-subtle, #ddd); }
+.avatar-item:hover .avatar-thumb { border-color: var(--accent, #4c9aff); }
+.avatar-item.avatar-selected .avatar-thumb { border-color: var(--accent, #4c9aff); outline: 2px solid var(--accent, #4c9aff); outline-offset: -2px; box-shadow: 0 0 6px rgba(76, 154, 255, 0.5); }
 .avatar-del-btn {
   position: absolute; top: -4px; right: -4px;
   width: 18px; height: 18px; border-radius: 50%; border: none;

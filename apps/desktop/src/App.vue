@@ -5,10 +5,11 @@ import { listen, emit } from '@tauri-apps/api/event'
 import { useCompanionStore } from '@/stores/companion'
 import { useSettingsStore } from '@/stores/settings'
 import { wsClient } from '@/services/ws'
-import { getMode } from '@/services/api'
+import { getMode, getCoreModelStatus, photoUrl } from '@/services/api'
 import { useCtrlOverride } from '@/composables/useCtrlOverride'
 import { useWsHandler } from '@/composables/useWsHandler'
 import ErrorBoundary from '@/components/Common/ErrorBoundary.vue'
+import ModelSetupOverlay from '@/components/Setup/ModelSetupOverlay.vue'
 import ChatPanel from '@/components/Chat/ChatPanel.vue'
 import SamHudPanel from '@/components/SamHUD/SamHudPanel.vue'
 import TopBar from '@/components/Layout/TopBar.vue'
@@ -44,8 +45,52 @@ const windowLabel = ref('')
 const isMainWindow = computed(() => windowLabel.value === 'main')
 const isPetWindow = computed(() => windowLabel.value === 'pet')
 
+// ── 核心模型引导下载（首次启动缺模型时显示全屏引导页）──
+const showModelSetup = ref(false)
+const modelSetupSkipped = ref(false)
+
+async function checkCoreModelsAndMaybeShowSetup() {
+  // 「跳过」仅对本次会话有效（内存态），每次启动都会重新检查，
+  // 避免 localStorage 标记在重装后仍残留导致永远不再弹出下载引导。
+  if (modelSetupSkipped.value) return
+
+  // 后端 sidecar 启动需要数秒（exe 解压 + 数据库初始化），首次请求可能连不上，
+  // 轮询等待后端就绪（最多约 20 秒）后再判断核心模型是否需要下载。
+  let status: Awaited<ReturnType<typeof getCoreModelStatus>> | null = null
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      status = await getCoreModelStatus()
+      break
+    } catch {
+      // 后端尚未就绪，等 1 秒后重试
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+
+  if (!status) {
+    // 长时间无法连接后端：本次不打扰用户，下次启动再试
+    return
+  }
+  if (status.ready) {
+    modelSetupSkipped.value = true
+    return
+  }
+  showModelSetup.value = true
+}
+
+function handleSetupSkip() {
+  // 仅本次会话跳过，不写 localStorage；下次启动仍会再次检查下载
+  modelSetupSkipped.value = true
+  showModelSetup.value = false
+}
+
+function handleSetupClose() {
+  modelSetupSkipped.value = true
+  showModelSetup.value = false
+}
+
 const bgImage = computed(() =>
-  companion.isWork ? 'url(/photo/work.png)' : 'url(/photo/playground.png)',
+  companion.isWork ? `url(${photoUrl('work.png')})` : `url(${photoUrl('playground.png')})`,
 )
 
 // ── TTS 当前播放控制 ──
@@ -125,6 +170,9 @@ if (currentWindow.label === 'pet') {
       // 1. 立即连接 WS（不阻塞，让连接状态条尽快显示「已连接」）
       connectWs()
 
+      // 0. 检测核心模型，缺失且未跳过 → 显示全屏引导下载页
+      checkCoreModelsAndMaybeShowSetup()
+
       // 补充 WS 状态处理：会话层逻辑（模式同步、dailyUnlock 同步、断连保护）
       wsClient.onStatus((status) => {
         // WS 连接建立 → 同步前端模式与 dailyUnlocked 状态到后端
@@ -202,6 +250,13 @@ watch(() => companion.voiceEnabled, (enabled) => {
       <RightPanel />
     </ErrorBoundary>
     <ApprovalDialog />
+
+    <!-- 🚀 首次启动核心模型引导下载页 -->
+    <ModelSetupOverlay
+      v-if="showModelSetup && isMainWindow"
+      @close="handleSetupClose"
+      @skip="handleSetupSkip"
+    />
 
     <!-- 💥 高能 60FPS 变身特效 Canvas -->
     <ModeTransitionCanvas ref="canvasRef" />

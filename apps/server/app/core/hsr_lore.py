@@ -39,8 +39,8 @@ def _get_normalizer():
     return _normalizer
 
 # ── 路径常量 ──
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]  # core/hsr_lore.py → 项目根
-_DB_PATH_DEFAULT = _PROJECT_ROOT / "data" / "lore_index.db"
+from app.core import paths as _paths
+_DB_PATH_DEFAULT = _paths.LORE_INDEX_PATH
 
 # ── 意图识别（保留自旧版）──
 
@@ -472,7 +472,7 @@ def _get_index() -> Optional[_LoreIndex]:
                 try:
                     from app.config import get_settings
                     p = get_settings().lore.index_path
-                    db_path = (_PROJECT_ROOT / p).resolve() if not Path(p).is_absolute() else Path(p)
+                    db_path = (_paths.ROOT / p).resolve() if not Path(p).is_absolute() else Path(p)
                 except Exception:
                     pass
                 _index = _LoreIndex(db_path)

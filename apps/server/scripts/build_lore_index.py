@@ -799,9 +799,11 @@ def build(no_vectors: bool = False, force: bool = False) -> None:
 
     if not no_vectors:
         print("加载 ONNX 模型……")
+        from app.core import paths as _paths
         from app.core.memory.embedding import OnnxEmbeddingEngine
         import numpy as np
-        engine = OnnxEmbeddingEngine()
+        # 必须指向本地导出好的模型目录（data/onnx_model），不能默认走 HuggingFace ID
+        engine = OnnxEmbeddingEngine(model_name_or_path=str(_paths.ONNX_MODEL_DIR))
         engine._ensure_loaded()
         t0 = time.time()
         for i, c in enumerate(chunks, start=1):

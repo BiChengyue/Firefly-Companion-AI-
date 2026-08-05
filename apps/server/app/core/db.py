@@ -19,9 +19,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# 项目根 → data/app.db
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-_DEFAULT_DB_PATH = str(_PROJECT_ROOT / "data" / "app.db")
+# 数据根 → data/app.db
+from app.core import paths as _paths
+
+_DEFAULT_DB_PATH = str(_paths.DATA_DIR / "app.db")
 
 _MIGRATIONS = [
     # 迁移：旧 sessions 表补 workspace_id
@@ -697,7 +698,7 @@ def load_concern_queue(
 # 内置默认工作空间 — 随项目根目录迁移，UI 不可删除
 BUILTIN_WS_ID = "__builtin__"
 _BUILTIN_WS_NAME = "默认工作空间"
-_BUILTIN_WS_PATH = str(_PROJECT_ROOT / "agent_workspace")
+_BUILTIN_WS_PATH = str(_paths.ROOT / "agent_workspace")
 
 # 确保内置工作空间文件夹存在
 os.makedirs(_BUILTIN_WS_PATH, exist_ok=True)

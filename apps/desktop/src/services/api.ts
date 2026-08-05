@@ -34,6 +34,16 @@ export function getApiBase(): string {
   return getBaseHttp()
 }
 
+/**
+ * 头像等后端静态图片的完整 URL。
+ * dev（Vite）下 base 为空 → 返回相对路径，由 Vite public 静态服务提供；
+ * 生产（Tauri webview）下拼后端地址，避免图片请求落到 tauri.localhost 而 404。
+ */
+export function photoUrl(filename: string): string {
+  const clean = filename.startsWith('/') ? filename.slice(1) : filename
+  return `${getBaseHttp()}/photo/${clean}`
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${getBaseHttp()}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -493,5 +503,83 @@ export async function uploadAvatar(
 
 export function deleteAvatar(category: string, filename: string): Promise<{ ok: boolean; deleted: string }> {
   return request<{ ok: boolean; deleted: string }>(`/api/avatars/${category}/${filename}`, { method: 'DELETE' })
+}
+
+// ── 核心模型下载（首次启动引导页 / 设置页）──
+export interface CoreModelFileStatus {
+  key: string
+  name: string
+  desc: string
+  size_mb: number
+  exists: boolean
+  path: string
+}
+
+export interface CoreModelStatus {
+  ready: boolean
+  total_files: number
+  present_files: number
+  missing_files: number
+  download_size_mb: number
+  files: CoreModelFileStatus[]
+}
+
+export function getCoreModelStatus(): Promise<CoreModelStatus> {
+  return request<CoreModelStatus>('/api/models/status')
+}
+
+export interface CoreModelDownloadEvent {
+  event: string
+  file?: string
+  index?: number
+  total?: number
+  size_mb?: number
+  file_downloaded_mb?: number
+  file_total_mb?: number
+  file_percent?: number
+  overall_downloaded_mb?: number
+  overall_total_mb?: number
+  overall_percent?: number
+  message?: string
+  error?: string
+}
+
+/**
+ * 通过 SSE 流式下载缺失的核心模型。
+ * 返回一个对象：{ promise, abort }。onEvent 收到 {event: 'progress'|'file_start'|'file_done'|'complete'|'fatal'|'already_complete', ...}。
+ */
+export function downloadCoreModels(onEvent: (evt: CoreModelDownloadEvent) => void): {
+  promise: Promise<void>
+  abort: () => void
+} {
+  const controller = new AbortController()
+  const promise = (async () => {
+    const res = await fetch(`${getBaseHttp()}/api/models/download`, {
+      method: 'POST',
+      signal: controller.signal,
+    })
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            onEvent(JSON.parse(line.slice(6)))
+          } catch { /* ignore malformed */ }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  })()
+  return { promise, abort: () => controller.abort() }
 }
 

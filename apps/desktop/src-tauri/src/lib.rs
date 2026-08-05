@@ -29,9 +29,9 @@ pub fn run() {
                 let _ = pet_win.set_always_on_top(true);
             }
 
-            // 开发模式自动启动 Python 后端，存到 SidecarState
+            // 自动启动 Python 后端（优先打包 exe，回退 dev 模式），存到 SidecarState
             // 应用退出时 SidecarState::Drop 自动 kill 子进程
-            match sidecar::auto_start_dev_sidecar() {
+            match sidecar::auto_start_sidecar(app.handle()) {
                 Ok(child) => {
                     let state = app.state::<SidecarState>();
                     *state.child.lock().unwrap() = Some(child);

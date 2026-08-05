@@ -8,9 +8,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# 音频缓存目录 (在根目录 data/audio_cache 下)
-BASE_DIR = Path(__file__).resolve().parents[5]
-CACHE_DIR = BASE_DIR / "data" / "audio_cache"
+# 音频缓存目录 (在数据根 data/audio_cache 下)
+from app.core import paths as _paths
+
+CACHE_DIR = _paths.AUDIO_CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # EdgeTTS 默认声音列表
@@ -124,7 +125,7 @@ class TTSService:
     @staticmethod
     def get_resource_voice_dir() -> Path:
         """获取项目内置流萤语音模型资源目录 (resources/voice/firefly)"""
-        return BASE_DIR / "resources" / "voice" / "firefly"
+        return _paths.FIREFLY_VOICE_DIR
 
     def list_available_voices() -> List[Dict[str, Any]]:
         """获取支持的音色列表"""

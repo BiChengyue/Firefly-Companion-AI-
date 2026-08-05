@@ -21,8 +21,9 @@ from app.core.tools.mcp_client import (
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
-# 项目根 mcp.json 路径
-_MCP_JSON_PATH = Path(__file__).resolve().parents[4] / "mcp.json"
+# 数据根 mcp.json 路径
+from app.core import paths as _paths
+_MCP_JSON_PATH = _paths.ROOT / "mcp.json"
 
 
 class AddMcpServerRequest(BaseModel):

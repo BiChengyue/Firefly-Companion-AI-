@@ -13,8 +13,10 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 
 router = APIRouter(prefix="/api/avatars", tags=["avatars"])
 
-# 头像存储目录：apps/desktop/public/photo/
-AVATAR_DIR = Path(__file__).resolve().parent.parent.parent.parent / "desktop" / "public" / "photo"
+# 头像存储目录：开发=apps/desktop/public/photo，打包=FIREFLY_ROOT/public/photo
+from app.core import paths as _paths
+
+AVATAR_DIR = _paths.PHOTO_DIR
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB

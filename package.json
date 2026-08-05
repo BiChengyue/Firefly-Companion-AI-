@@ -13,7 +13,7 @@
     "dev:frontend": "npm -w apps/desktop run dev",
     "dev:server": "cd apps/server && python -m uvicorn main:app --port 8765",
     "build": "npm -w apps/desktop run build",
-    "build:server": "cd apps/server && pyinstaller --onefile main.py",
+    "build:server": "cd apps/server && python -m PyInstaller firefly_server.spec --noconfirm --distpath dist --workpath build && cd ../desktop/src-tauri && copy /Y ..\\..\\server\\dist\\firefly-server\\firefly-server.exe binaries\\firefly-server.exe",
     "lint": "eslint . --ext .ts,.vue",
     "typecheck": "npm -w apps/desktop run typecheck && npm -w packages/shared-types run typecheck"
   },
