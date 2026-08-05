@@ -13,6 +13,12 @@
 
 
 
+## 🎬 视频介绍
+
+👉 [**流萤桌面 AI 伴侣 · 演示视频**](https://www.bilibili.com/video/BV1GLM16uEfi/)
+
+---
+
 ## ✨ 核心功能
 
 
@@ -445,6 +451,5 @@ Firefly-Companion-AI-/
 - TTS 语音权重来源于 B 站 UP 主 [**星萤青焰灼**](https://space.bilibili.com/1831492534)
 - 剧情库与人物设计参考了 [HSRChat](https://github.com/XCreeperPa/HSRChat) 与 [firefly-skill](https://github.com/HeartEase1/firefly-skill) 两个开源项目
 - 表情包与图片素材部分来源于网络，部分由 AI 生成
-- TTS 语音权重由社区贡献者提供
 - 本项目代码部分采用 **MIT** 协议
 - 整体项目**仅供个人学习交流使用，禁止商用**
