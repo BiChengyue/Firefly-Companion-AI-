@@ -22,7 +22,7 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="https://api.deepseek.com/v1", alias="baseUrl")
     temperature: float = 0.8
     max_tokens: int = Field(default=2048, alias="maxTokens")
-    enable_thinking: bool = Field(default=True, alias="enableThinking")
+    enable_thinking: bool = Field(default=False, alias="enableThinking")
 
 
 class ModeConfig(BaseModel):
@@ -41,7 +41,7 @@ class STTConfig(BaseModel):
 
 
 class TTSConfig(BaseModel):
-    engine: str = "edge-tts"
+    engine: str = "gpt-sovits"
     voice: str = "zh-CN-XiaoyiNeural"
     rate: str = "+0%"
     volume: str = "+0%"

@@ -666,8 +666,14 @@ async function renameSession(id: string, title: string) {
     }
   }
 
-  /** 从后端加载头像列表（具备离线缓存与启动异步重试） */
+  /** 从后端加载头像列表（具备离线缓存与启动异步重试）
+   *  - 非重试模式：先等后端 /health 就绪再请求，防止 /photo 挂载前 404 死锁
+   *  - 后端超时则走离线缓存/fallback，异步重试最终恢复 */
   async function loadAvatars(isRetry = false) {
+    // ── 等待后端 sidecar 就绪（/photo 静态路由挂载完成）──
+    if (!isRetry) {
+      await api.waitForBackend(15000, 600)
+    }
     try {
       const [dailyRes, workRes] = await Promise.all([
         api.getAvatars('daily'),

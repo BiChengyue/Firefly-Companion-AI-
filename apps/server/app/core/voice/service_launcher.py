@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from app.core import paths as _paths
 from app.core.voice.model_manager import check_model_status, get_engine_dir
 
 import atexit
@@ -21,6 +22,56 @@ import ctypes
 from ctypes import wintypes
 
 logger = logging.getLogger(__name__)
+
+# ── tts_infer.yaml 定制配置（兜底模板）───────────────────────────────────
+# custom 段指向流萤专属权重（../firefly/ 相对引擎目录解析 = 数据根/voice/firefly/）。
+# 当打包资源根也缺失 tts_infer.yaml 时，用它生成一份可用的配置。
+_DEFAULT_TTS_INFER_YAML = """\
+custom:
+  bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
+  cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
+  device: cuda
+  is_half: true
+  t2s_weights_path: ../firefly/gpt_weights/firefly-e50.ckpt
+  version: v2
+  vits_weights_path: ../firefly/sovits_weights/firefly_e10_s4420_l32.pth
+v1:
+  bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
+  cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
+  device: cpu
+  is_half: false
+  t2s_weights_path: GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt
+  version: v1
+  vits_weights_path: GPT_SoVITS/pretrained_models/s2G488k.pth
+v2:
+  bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
+  cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
+  device: cpu
+  is_half: false
+  t2s_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt
+  version: v2
+  vits_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth
+v3:
+  bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
+  cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
+  device: cpu
+  is_half: false
+  t2s_weights_path: GPT_SoVITS/pretrained_models/s1v3.ckpt
+  version: v3
+  vits_weights_path: GPT_SoVITS/pretrained_models/s2Gv3.pth
+v4:
+  bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
+  cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
+  device: cpu
+  is_half: false
+  t2s_weights_path: GPT_SoVITS/pretrained_models/s1v3.ckpt
+  version: v4
+  vits_weights_path: GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth
+"""
+
+# 流萤专属权重（相对引擎目录的 ../firefly/ → 数据根/voice/firefly/）
+_FIREFLY_T2S_WEIGHTS = "../firefly/gpt_weights/firefly-e50.ckpt"
+_FIREFLY_VITS_WEIGHTS = "../firefly/sovits_weights/firefly_e10_s4420_l32.pth"
 
 _process: Optional[subprocess.Popen] = None
 _job_handle = None
@@ -104,6 +155,106 @@ def _load_config_python_path() -> Optional[str]:
     return None
 
 
+def _ensure_tts_infer_config(engine_dir: Path) -> bool:
+    """校验并修复 tts_infer.yaml，确保 custom 段指向存在的流萤权重。
+
+    背景：打包时 GPT_SoVITS/configs/.gitignore 的 ``*.yaml`` 曾使
+    ``tts_infer.yaml`` 未被 git 跟踪 → PyInstaller 只收集 git 跟踪文件，
+    安装版引擎目录缺失该配置；api_v2 回退原版默认配置（指向不存在的
+    ``gsv-v2final-pretrained`` 权重）→ FileNotFoundError 崩溃。
+
+    这里做三重兜底：
+      1. 文件缺失 → 从资源根（打包内置）复制；资源根也没有 → 写入内置模板；
+      2. custom 段的 t2s/vits 权重路径指向的文件不存在 → 改写为流萤权重；
+      3. 已存在且路径有效 → 不动。
+
+    返回 True 表示启动前配置就绪（或已修复），False 表示无法写入配置。
+    """
+    import shutil
+
+    cfg_dir = engine_dir / "GPT_SoVITS" / "configs"
+    cfg_file = cfg_dir / "tts_infer.yaml"
+
+    # 1) 文件缺失：优先从资源根（打包内置）复制
+    if not cfg_file.exists():
+        try:
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            bundled = (
+                _paths.RESOURCE_ROOT
+                / "resources"
+                / "voice"
+                / "gpt_sovits_engine"
+                / "GPT_SoVITS"
+                / "configs"
+                / "tts_infer.yaml"
+            )
+            if bundled.is_file():
+                shutil.copy2(bundled, cfg_file)
+                logger.info(f"[GPT-SoVITS Service] 已从资源根补齐 tts_infer.yaml: {cfg_file}")
+            else:
+                cfg_file.write_text(_DEFAULT_TTS_INFER_YAML, encoding="utf-8")
+                logger.warning(f"[GPT-SoVITS Service] 资源根无 tts_infer.yaml，已写入内置定制配置: {cfg_file}")
+        except OSError as e:
+            logger.error(f"[GPT-SoVITS Service] 写入 tts_infer.yaml 失败: {e}")
+            return False
+
+    # 2) 校验 custom 段权重路径（相对 engine_dir 解析，与 api_v2 的 cwd 一致）
+    try:
+        import yaml
+
+        with open(cfg_file, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        custom = data.get("custom") or {}
+        t2s = str(custom.get("t2s_weights_path") or "")
+        vits = str(custom.get("vits_weights_path") or "")
+        t2s_ok = bool(t2s) and (engine_dir / t2s).exists()
+        vits_ok = bool(vits) and (engine_dir / vits).exists()
+        if t2s_ok and vits_ok:
+            return True
+        logger.warning(
+            f"[GPT-SoVITS Service] tts_infer.yaml custom 段权重路径无效 "
+            f"(t2s={t2s!r} exists={t2s_ok}, vits={vits!r} exists={vits_ok})，改写为流萤权重…"
+        )
+    except Exception as e:
+        logger.warning(f"[GPT-SoVITS Service] 解析 tts_infer.yaml 失败，将整体重建: {e}")
+
+    # 3) 行级改写 custom 段路径（保留其余配置项），无 custom 段则追加
+    try:
+        lines = cfg_file.read_text(encoding="utf-8").splitlines()
+        out: list[str] = []
+        in_custom = False
+        changed = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "custom:":
+                in_custom = True
+                out.append(line)
+                continue
+            if in_custom:
+                if stripped and not line.startswith(("  ", "\t")):
+                    in_custom = False  # 已离开 custom 段
+                elif stripped.startswith("t2s_weights_path:"):
+                    out.append("  t2s_weights_path: " + _FIREFLY_T2S_WEIGHTS)
+                    changed = True
+                    continue
+                elif stripped.startswith("vits_weights_path:"):
+                    out.append("  vits_weights_path: " + _FIREFLY_VITS_WEIGHTS)
+                    changed = True
+                    continue
+            out.append(line)
+        if not changed:
+            out.append("custom:")
+            out.append("  t2s_weights_path: " + _FIREFLY_T2S_WEIGHTS)
+            out.append("  version: v2")
+            out.append("  vits_weights_path: " + _FIREFLY_VITS_WEIGHTS)
+        cfg_file.write_text("\n".join(out) + "\n", encoding="utf-8")
+        logger.info(f"[GPT-SoVITS Service] 已修复 tts_infer.yaml → {cfg_file}")
+        return True
+    except OSError as e:
+        logger.error(f"[GPT-SoVITS Service] 修复 tts_infer.yaml 失败: {e}")
+        return False
+
+
 def is_port_in_use(host: str = "127.0.0.1", port: int = 9880) -> bool:
     """检测指定端口是否已有服务在监听"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -150,8 +301,13 @@ def ensure_gpt_sovits_started(host: str = "127.0.0.1", port: int = 9880, timeout
             )
             return False
 
-        # 5. 启动 api_v2.py 子进程
+        # 4.5 校验/修复 tts_infer.yaml（防止打包漏带或权重路径无效导致 api_v2 崩溃）
         engine_dir = get_engine_dir()
+        if not _ensure_tts_infer_config(engine_dir):
+            logger.error("[GPT-SoVITS Service] tts_infer.yaml 修复失败，中止启动。")
+            return False
+
+        # 5. 启动 api_v2.py 子进程
         api_script = engine_dir / "api_v2.py"
 
         if not api_script.exists():

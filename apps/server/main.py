@@ -42,6 +42,14 @@ async def lifespan(_app: FastAPI):
     from app.core import paths as _paths
     _paths.ensure_data_dirs()
 
+    # 可写目录的静态挂载必须放在 ensure_data_dirs() 之后：打包模式首次启动时
+    # FIREFLY_ROOT/public/photo、data/memes 尚不存在，若在模块导入期挂载会被
+    # exists() 检查跳过，导致首次启动头像/用户表情包 404（重启后才正常）。
+    if _paths.USER_MEMES_DIR.is_dir():
+        _app.mount("/user-memes", StaticFiles(directory=str(_paths.USER_MEMES_DIR)), name="user-memes")
+    if _paths.PHOTO_DIR.is_dir():
+        _app.mount("/photo", StaticFiles(directory=str(_paths.PHOTO_DIR)), name="photo")
+
     # 动态加载内置 LLM Provider — 对应 spec 3.3.1
     from app.core.llm.registry import load_builtin_providers
     load_builtin_providers()
@@ -188,26 +196,20 @@ app.include_router(mcp_router)
 app.include_router(models_router)
 app.include_router(tools_router)
 
-# 静态文件服务 — 内置表情包与用户自定义表情包
+# 静态文件服务 — 内置表情包（只读资源，模块导入时已存在，可直接挂载）
 from app.core import paths as _paths
 
 _BUILTIN_MEMES = _paths.BUILTIN_MEMES_DIR
-_USER_MEMES = _paths.USER_MEMES_DIR
-
 if _BUILTIN_MEMES.exists():
     app.mount("/memes", StaticFiles(directory=str(_BUILTIN_MEMES)), name="memes")
-if _USER_MEMES.exists():
-    app.mount("/user-memes", StaticFiles(directory=str(_USER_MEMES)), name="user-memes")
 
 # Live2D 模型资源静态挂载 — pixi-live2d-display 通过 HTTP 加载模型文件
 _LIVE2D_ROOT = _paths.LIVE2D_DIR
 if _LIVE2D_ROOT.exists():
     app.mount("/static/live2d", StaticFiles(directory=str(_LIVE2D_ROOT)), name="live2d-static")
 
-# 头像静态资源挂载 — 管理与展示用户头像
-_PHOTO_DIR = _paths.PHOTO_DIR
-if _PHOTO_DIR.exists():
-    app.mount("/photo", StaticFiles(directory=str(_PHOTO_DIR)), name="photo")
+# /user-memes 与 /photo 为可写数据目录，挂载已移至 lifespan（ensure_data_dirs 之后），
+# 避免打包模式首次启动时因目录尚不存在而挂载失败（见 lifespan）。
 
 
 @app.get("/")

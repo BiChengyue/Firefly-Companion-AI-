@@ -41,7 +41,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const llmBaseUrl = ref(loadStr('firefly_llm_base_url', ''))
   const llmMaxTokens = ref(loadNum('firefly_llm_max_tokens', 4096))
   const llmTemperature = ref(loadNum('firefly_llm_temperature', 0.8))
-  const llmEnableThinking = ref(loadBool('firefly_llm_enable_thinking', true))
+  const llmEnableThinking = ref(loadBool('firefly_llm_enable_thinking', false))
   const serverUrl = ref(loadStr('firefly_server_url', 'ws://127.0.0.1:8765'))
   const httpBaseUrl = ref(loadStr('firefly_http_base', 'http://127.0.0.1:8765'))
 
@@ -50,7 +50,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const reconnectDelay = ref(loadNum('firefly_reconnect_delay', 5000))
 
   // ── 语音设置 ───────────────────────────────────────
-  const voiceProvider = ref(loadStr('firefly_voice_provider', 'edge-tts'))
+  const voiceProvider = ref(loadStr('firefly_voice_provider', 'gpt-sovits'))
   const voiceId = ref(loadStr('firefly_voice_id', 'zh-CN-XiaoyiNeural'))
   const gptSovitsUrl = ref(loadStr('firefly_gpt_sovits_url', 'http://127.0.0.1:9880'))
   const gptSovitsPythonPath = ref(loadStr('firefly_gpt_sovits_python_path', ''))

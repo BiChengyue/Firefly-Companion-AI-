@@ -60,6 +60,23 @@ export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/health')
 }
 
+/** 轮询等待后端 sidecar 就绪（最多等待 maxWaitMs 毫秒）。
+ *  用于启动阶段确保 /photo 静态路由已挂载后再加载头像等资源，
+ *  避免首次渲染时图片全部 404 导致破图无法恢复。 */
+export async function waitForBackend(maxWaitMs = 20000, intervalMs = 800): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(`${getBaseHttp()}/health`, { signal: AbortSignal.timeout(2000) })
+      if (res.ok) return true
+    } catch {
+      // 后端尚未就绪，继续等待
+    }
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return false
+}
+
 export function getMode(): Promise<ModeConfig> {
   return request<ModeConfig>('/api/mode')
 }

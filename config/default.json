@@ -19,7 +19,7 @@
       "language": "zh"
     },
     "tts": {
-      "engine": "minimax",
+      "engine": "gpt-sovits",
       "voice": "custom",
       "rate": "+0%",
       "volume": "+0%"

@@ -37,7 +37,7 @@
 **后端引擎：**
 - **纯 SQLite 存储**：记忆向量以 BLOB 形式存储在 SQLite 中，不依赖 ChromaDB 等任何外部向量数据库
 - **双引擎向量检索**：
-  - **ONNX 真语义引擎**：`paraphrase-multilingual-MiniLM-L12-v2`（384 维，~120MB），支持中英双语跨语言语义检索
+  - **ONNX 真语义引擎**：`paraphrase-multilingual-MiniLM-L12-v2`（384 维，~470MB），支持中英双语跨语言语义检索
   - **哈希领域增强引擎**：自研 23 类手工领域知识投影（food / health / game / music / travel...），零模型文件，零外部依赖
   - **混合召回**：ONNX 语义 75% + 哈希领域 25% 加权融合
 - **Mem0 记忆生命周期**：ADD / UPDATE / DELETE / IGNORE 判决链，自动去重与冲突合并
@@ -73,7 +73,7 @@
 ### ⚙️ GPT-SoVITS 使用说明
 
 - ⚠️ **内存占用**：GPT-SoVITS 会占用约 **2GB 后台内存**，**电脑内存小的不建议开启**。
-- **权重文件**：项目内已包含权重文件；因空间过大，其余文件需自行下载。
+- **权重文件**：流萤 TTS 权重文件（约 220MB）不随仓库分发，首次启动时通过前端引导页自动下载，也可从 [GitHub Releases](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 手动下载后放到对应目录。
 - **环境配置**：已配置好环境脚本，打开引擎目录点击对应文件等待下载即可（下载时间较长、体积大，请耐心等待）。下载完成后还会提示下载缺少的 **SoVITS V4**——两者都下载好会显示「Python 推理环境已就绪」。
 - **拉起引擎**：点击「拉起原声引擎」，完成后会显示「已拉起」。可用「测试」按钮确认声音模型是否在工作。
 - **释放内存**：若觉得内存占用过大，可点击「释放内存」。
@@ -131,16 +131,7 @@
 
 **构建工具：** `python apps/server/scripts/build_lore_index.py --force --no-vectors` 一键重建 6717 块索引
 
-**📁 角色素材库 `resources/流萤/`（L1~L2 官方原文）：**
 
-该目录是流萤**角色文本的原始素材库**，由 `build_lore_index.py` 在构建索引时解析入库：
-
-```
-resources/流萤/
-├── 主线剧情文本/      # 官方主线剧情（22 个 .md），category: story_main_official
-├── 角色游戏文本/      # 角色故事 1-4 / 角色语音.md / 短信/，category: character_story_official 等
-└── 官方视频文本/      # PV 剧本 / 对话，category: story_video_official
-```
 
 - **使用方式**：运行 `python apps/server/scripts/build_lore_index.py` 时，`build_lore_index.py` 会自动读取 `resources/流萤/` 下的三个子目录，解析为剧情块并写入 `data/lore_index.db`（FTS5 全文索引 + 向量）。运行时由 `hsr_lore.py` 懒加载该索引做召回。
 - **首次使用前必须构建**：若 `data/lore_index.db` 不存在，`hsr_lore.py` 会提示"请运行 scripts/build_lore_index.py"，此时 `resources/流萤/` 的素材尚未生效。
@@ -170,7 +161,26 @@ resources/流萤/
 
 ---
 
-## 🚀 部署指南
+## 📦 安装包使用（Windows 推荐）
+
+从 [Releases 页面](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 下载最新版 `FireflyCompanion_x64-setup.exe`，双击安装即可。
+
+> [!IMPORTANT]
+> **模型下载说明**：安装包已内置流萤 TTS 权重（约 220MB）与 ffmpeg，无需下载；首次启动仅需自动下载 ONNX 语义模型（约 470MB）。启动时会弹出模型引导页，自动从国内镜像（hf-mirror.com）下载，支持断点续传。
+>
+> ⚠️ **请勿挂代理 / 梯子下载！** 下载源为国内镜像节点，挂代理反而会拖慢下载速度，甚至导致连接失败。
+
+### 安装后还需手动配置
+
+| 依赖 | 大小 | 获取方式 | 放置位置 |
+|---|---|---|---|
+| **ffmpeg**（语音合成必需） | 约 128MB | 安装包已自带，无需手动下载 | 自动放入 |
+| **GPT-SoVITS 环境**（可选） | 约 3-5GB | 设置页 → 语音 → 点「打开引擎目录」，在打开的目录中双击 `install_env.bat` | 自动创建 |
+| **LLM API Key** | — | 在应用内「设置 → LLM」面板直接填写（安装包模式下无需手动编辑配置文件） | 应用内保存 |
+
+---
+
+## 🛠️ 源码构建（开发者）
 
 ### 环境要求
 
@@ -258,7 +268,10 @@ pnpm dev
 
 Tauri 桌面应用启动后会自动在后台拉起 Python 后端（Sidecar 模式），无需手动启动服务。
 
-首次启动时 ONNX 引擎会自动从 HuggingFace 下载语义模型（约 120MB），后续启动复用缓存。
+> [!IMPORTANT]
+> **首次启动模型下载**：ONNX 语义模型（~470MB）与流萤 TTS 权重（约 220MB）不随仓库分发，首次启动时会弹出模型引导页，自动从国内镜像（hf-mirror.com）下载，支持断点续传。下载完成后后续启动直接复用。
+>
+> ⚠️ **请勿挂代理 / 梯子下载！** 下载源为国内镜像节点，挂代理反而会拖慢下载速度，甚至导致连接失败。
 
 ### 可选：语音环境
 
@@ -272,7 +285,13 @@ GPT-SoVITS 本地语音合成是**可选的**，不配置也能正常使用对�
 
 两脚本都会自动创建独立 Python 环境（约 3-5 GB，10-20 分钟）。
 
-**模型权重下载**：ONNX 语义模型（`data/onnx_model/model.onnx`）与流萤 TTS 权重（`firefly-e50.ckpt` / `firefly_e10_s4420_l32.pth`）体积较大，不随仓库分发，而是托管在 GitHub Releases。克隆后请先运行：
+**备用手动下载**：如果自动下载失败，可手动从 [GitHub Releases（v0.2.0-models）](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 下载三个核心文件放置到对应路径，或使用备用脚本：
+
+| 文件 | 大小 | 放置路径 |
+|---|---|---|
+| `model.onnx` | ~470MB | `data/onnx_model/model.onnx` |
+| `firefly-e50.ckpt` | ~148MB | `resources/voice/firefly/gpt_weights/firefly-e50.ckpt` |
+| `firefly_e10_s4420_l32.pth` | ~72MB | `resources/voice/firefly/sovits_weights/firefly_e10_s4420_l32.pth` |
 
 ```bash
 python scripts/download_models.py        # 自动下载缺失的模型到对应位置
@@ -280,14 +299,9 @@ python scripts/download_models.py --force # 强制重新下载
 python scripts/download_models.py --file model.onnx  # 只下载某个文件
 ```
 
-也可手动从 [Releases 页面](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 下载后放到对应目录。
-
 **手动配置**：如已有 GPT-SoVITS 整合包，在 **设置 → 语音** 面板中填入解释器路径即可（Windows 为 `整合包/env/Scripts/python.exe`，macOS / Linux 为 `整合包/env/bin/python`）。
 
-> **⚠️ ffmpeg 依赖说明**：GPT-SoVITS 语音合成依赖 **ffmpeg** 做音频处理，但该二进制文件**不随仓库提交**（体积大且为平台相关）。若你的系统未安装 ffmpeg：
-> - **Windows**：从 [ffmpeg.org](https://ffmpeg.org/download.html) 或 GPT-SoVITS 整合包获取 `ffmpeg.exe` 与 `ffprobe.exe`，放入 `resources/voice/gpt_sovits_engine/bin/` 目录（引擎启动时会自动检测并加载）；
-> - **macOS / Linux**：用包管理器安装，如 `brew install ffmpeg` / `sudo apt install ffmpeg`。
-> 已安装 ffmpeg 的用户可跳过此步（引擎会自动从系统 PATH 调用）。
+> **ffmpeg**：GPT-SoVITS 语音合成依赖 ffmpeg 做音频处理，仓库已内置 Windows 版 `ffmpeg.exe` / `ffprobe.exe`（`resources/voice/gpt_sovits_engine/bin/`），引擎启动时自动加载，无需手动安装。macOS / Linux 用户可用包管理器安装：`brew install ffmpeg` / `sudo apt install ffmpeg`。
 
 **推理加速说明：**
 - **Windows / Linux（NVIDIA）**：自动启用 CUDA 推理，延迟从 CPU 的 30-60s 降至 ~0.3s。
@@ -319,7 +333,10 @@ python scripts/download_models.py --file model.onnx  # 只下载某个文件
 <details>
 <summary><b>Q: ONNX 模型下载失败？</b></summary>
 
-国内用户可能需要配置 HuggingFace 镜像：设置环境变量 `HF_ENDPOINT=https://hf-mirror.com`。
+模型通过国内镜像（hf-mirror.com）自动下载，一般情况下无需额外配置。如仍失败：
+1. 请勿挂代理 / 梯子，关闭后重试；
+2. 若因网络环境无法访问 hf-mirror，可使用备用脚本 `python scripts/download_models.py` 从 GitHub Releases 下载；
+3. 或手动从 [Releases 页面](https://github.com/hhjk21/Firefly-Companion-AI-/releases) 下载文件，按上方模型路径表格放置。
 </details>
 
 <details>
@@ -401,8 +418,7 @@ Firefly-Companion-AI-/
 ├── resources/
 │   ├── live2d/firefly/      # Live2D 模型文件
 │   ├── memes/               # 表情包
-│   ├── avatar/              # 头像
-│   ├── photo/               # 背景图
+│   ├── photo/               # 头像与背景图
 │   ├── voice/               # TTS 引擎与模型
 │   └── 流萤/                # 流萤角色文本素材（主线剧情 / 角色游戏 / 官方视频文本）
 └── packages/

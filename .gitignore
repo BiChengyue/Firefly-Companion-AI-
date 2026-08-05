@@ -61,7 +61,9 @@ apps/build_rust.log
 *.tsbuildinfo
 apps/desktop/vite.config.js
 apps/desktop/vite.config.d.ts
-resources/voice/gpt_sovits_engine/bin/
+resources/voice/gpt_sovits_engine/bin/*
+!resources/voice/gpt_sovits_engine/bin/ffmpeg.exe
+!resources/voice/gpt_sovits_engine/bin/ffprobe.exe
 
 # 大权重模型（托管于 GitHub Releases，通过 scripts/download_models.py 下载，不随仓库提交）
 data/onnx_model/

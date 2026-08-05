@@ -102,6 +102,22 @@ if _LORE_INDEX.exists():
 else:
     print("[spec] WARN: 剧情库索引缺失，请先运行 scripts/build_lore_index.py")
 
+# ffmpeg 二进制（bin 目录被 .gitignore 忽略，不会被 _collect_git_files 收集，
+# 需仿照大文件逻辑硬编码。打包后位于资源根 _internal 下，
+# 首次启动由 _sync_engine_code() 自动复制到可写数据根。）
+_FFMPEG_BIN = [
+    "resources/voice/gpt_sovits_engine/bin/ffmpeg.exe",
+    "resources/voice/gpt_sovits_engine/bin/ffprobe.exe",
+]
+for rel in _FFMPEG_BIN:
+    src = PROJECT_ROOT / rel
+    if src.exists():
+        sz = src.stat().st_size // (1024 * 1024)
+        datas.append((str(src), str(Path(rel).parent)))
+        print(f"[spec] 收集 ffmpeg {src.name} ({sz}MB)")
+    else:
+        print(f"[spec] WARN: ffmpeg 依赖缺失，跳过: {src}")
+
 print(f"[spec] 收集 config 数据 {len([d for d in datas if d[1].startswith('config')])} 项")
 print(f"[spec] 收集 resources 数据 {len([d for d in datas if d[1].startswith('resources')])} 项")
 

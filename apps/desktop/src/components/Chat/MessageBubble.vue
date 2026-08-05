@@ -89,19 +89,26 @@ const hasReasoning = computed(() => (props.msg.tokenUsage?.reasoningTokens || 0)
 const hasCache = computed(() => (props.msg.tokenUsage?.cachedTokens || 0) > 0)
 
 // 头像 - 助手（复用 store 中统一逻辑）
-const assistantAvatarSrc = computed(() => companion.getCurrentAvatar())
+// 依赖 avatarRetry：失败计数变化时重新求值并拼上 ?retry=N 破除浏览器 404 缓存
+const assistantAvatarSrc = computed(() => {
+  const base = companion.getCurrentAvatar()
+  if (!base) return base
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}_rt=${avatarRetry.value}`
+})
 
-function handleAvatarError(e: Event) {
-  const target = e.target as HTMLImageElement
-  if (target) {
-    const currentSrc = assistantAvatarSrc.value
-    if (currentSrc) {
-      companion.markAvatarFailed(currentSrc)
-    }
-    if (!target.src.endsWith(photoUrl('avatar.png'))) {
-      target.src = photoUrl('avatar.png')
-    }
+/** 头像失败重试计数器：每失败一次计数+1，迫使 Vue 响应式重新求值并带上
+ *  不同 query string 以破除浏览器/WebView2 对 404 的强缓存。 */
+const avatarRetry = ref(0)
+
+function handleAvatarError(_e: Event) {
+  const currentSrc = assistantAvatarSrc.value
+  if (currentSrc) {
+    companion.markAvatarFailed(currentSrc)
   }
+  // 不直接修改 target.src —— 那会覆盖 Vue 的 :src 绑定，导致响应式断开。
+  // 改为 bump 计数器，让 assistantAvatarSrc 重新求值（带 ?retry= N 破缓存）。
+  avatarRetry.value++
 }
 
 // ── 右键菜单：删除单条消息 ──────────────────────────────
