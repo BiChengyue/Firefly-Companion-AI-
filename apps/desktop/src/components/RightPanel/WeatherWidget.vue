@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 天气小组件 — 通过后端 /api/weather 代理获取天气 (open-meteo 免费源)，支持城市输入，5 分钟本地缓存。 */
 import { ref, onMounted, nextTick } from 'vue'
+import { getApiBase } from '@/services/api'
 
 const temp = ref('--')
 const icon = ref('🌤')
@@ -53,7 +54,10 @@ async function fetchWeather(cityName: string, silent = false) {
   const myVersion = ++fetchVersion
   if (!silent) loading.value = true
 
-  const apiUrl = `http://127.0.0.1:8765/api/weather?city=${encodeURIComponent(cityName)}`
+  // T-20 切单轨配套（2026-08-06）：原硬编码 127.0.0.1:8765（后端同机假设）在
+  // 桌宠=总线客户端改造后失效（后端在 Tailnet 服务器）。改用 api.ts 的 getApiBase()：
+  // dev(vite proxy) / 生产(Tailnet 默认 + localStorage firefly_http_base 覆盖) 统一。
+  const apiUrl = `${getApiBase()}/api/weather?city=${encodeURIComponent(cityName)}`
   try {
     console.log('[Weather] 请求:', apiUrl)
     const res = await fetch(apiUrl, {
