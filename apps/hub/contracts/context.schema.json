@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pch.local/contracts/context.schema.json",
+  "title": "脱敏上下文（供交互层）",
+  "description": "控制中心 → 流萤 的上下文。只含脱敏、相关、带有效期与置信度的信息；绝不含精确位置、原始短信、令牌。",
+  "type": "object",
+  "required": ["context_id", "issued_at", "expires_at", "state", "sources"],
+  "properties": {
+    "context_id": { "type": "string" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time", "description": "有效期；过期后不得再注入模型" },
+    "state": {
+      "type": "object",
+      "description": "状态推断结果（脱敏）",
+      "properties": {
+        "life_state": { "enum": ["sleeping", "just_woke", "eating", "out", "commuting", "busy", "leisure", "gaming", "unknown"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "location_bucket": { "enum": ["home", "dorm", "school", "work", "transit", "away", "unknown"], "description": "粗粒度地点，非精确坐标" }
+      },
+      "required": ["life_state", "confidence"]
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "text", "source", "as_of"],
+        "properties": {
+          "kind": { "enum": ["weather", "calendar", "delivery", "trip", "server", "project", "note"] },
+          "text": { "type": "string", "maxLength": 500 },
+          "source": { "type": "string" },
+          "as_of": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "sources": { "type": "array", "items": { "type": "string" }, "description": "哪些设备/数据源参与了本次推断（审计用，脱敏）" }
+  },
+  "additionalProperties": false
+}

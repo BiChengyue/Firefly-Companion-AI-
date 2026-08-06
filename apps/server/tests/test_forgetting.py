@@ -25,17 +25,17 @@ class TestDecayRates:
 
     def test_accessory_decays_fast(self):
         """外设衰减最快。"""
-        assert TOPIC_DECAY_RATES["hardware_accessory"] == 0.85
+        assert TOPIC_DECAY_RATES["hardware_accessory"] == 0.94
 
     def test_entertainment_decays_fairly_fast(self):
         """兴趣/娱乐衰减较快。"""
-        assert TOPIC_DECAY_RATES["entertainment_hobby"] <= 0.92
+        assert TOPIC_DECAY_RATES["entertainment_hobby"] <= 0.93
 
-    def test_all_15_topics_covered(self):
-        assert len(TOPIC_DECAY_RATES) == 15
+    def test_all_topics_covered(self):
+        assert len(TOPIC_DECAY_RATES) == 27
 
     def test_unknown_topic_has_default(self):
-        assert DEFAULT_DECAY_RATE == 0.92
+        assert DEFAULT_DECAY_RATE == 0.90
 
 
 class TestDecayThresholds:

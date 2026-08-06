@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pch.local/contracts/intent.schema.json",
+  "title": "受限意图（交互层 → 策略引擎）",
+  "description": "流萤把自然语言转换为受限意图提交给策略引擎；执行由策略引擎与特权 Broker 决定。",
+  "type": "object",
+  "required": ["intent_id", "intent_type", "issued_at", "session"],
+  "properties": {
+    "intent_id": { "type": "string" },
+    "intent_type": {
+      "enum": [
+        "query_status", "query_calendar", "query_weather", "query_delivery",
+        "query_server", "query_project", "remind", "celebrate", "suggest_meal",
+        "request_action", "unknown"
+      ]
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "session": { "type": "string", "description": "交互会话标识（如 c2c:openid），用于审计" },
+    "params": { "type": "object", "additionalProperties": true, "description": "意图参数；request_action 时仅允许白名单动作" },
+    "wants_action": { "type": "boolean", "default": false, "description": "true 时仅表示表达意愿，是否执行由策略决定" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,5 @@
+# Hub 运行依赖（D-3 迁入同仓后补声明；2026-08-06，工单 T-01R）
+# 参考原 personal-control-hub/.venv：jsonschema 4.26.0 / psutil 7.2.2
+# 传递依赖（attrs / referencing / rpds-py）由 pip 自动解析安装。
+jsonschema>=4.23
+psutil>=5.9

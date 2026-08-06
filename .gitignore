@@ -79,3 +79,8 @@ apps/desktop/src-tauri/binaries/
 FireflyCompanion_*_setup.exe
 FireflyCompanion_*_x64-setup.exe
 
+
+# AI-5 审查建议（2026-08-06）：pytest 缓存与 SQLite WAL 副产物不入库
+.pytest_cache/
+data/*.db-shm
+data/*.db-wal

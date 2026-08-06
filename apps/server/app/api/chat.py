@@ -26,6 +26,31 @@ from app.core.tools.builtin.core_tools import web_search
 
 logger = get_logger("api.chat")
 
+# ── QQ 通道协议（A2：channel=="qq" 时注入 data/skills/firefly-qq-protocol/SKILL.md）──
+# 仓库根 = chat.py 向上 5 层（api → app → server → apps → 根）
+_ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))))
+_QQ_PROTOCOL_FILE = _os.path.join(_ROOT_DIR, "data", "skills", "firefly-qq-protocol", "SKILL.md")
+_qq_protocol_cache = {"mtime": 0.0, "text": ""}
+
+
+def _qq_protocol_block() -> str:
+    """QQ 通道协议（消息格式 + 档位上限）。文件热生效；>8KB 截断；失败静默降级。"""
+    global _qq_protocol_cache
+    try:
+        mtime = _os.path.getmtime(_QQ_PROTOCOL_FILE)
+        if mtime != _qq_protocol_cache["mtime"]:
+            with open(_QQ_PROTOCOL_FILE, encoding="utf-8") as f:
+                text = f.read().strip()
+            if len(text) > 8192:
+                text = text[:8192]
+            _qq_protocol_cache = {"mtime": mtime, "text": text}
+        if _qq_protocol_cache["text"]:
+            return "\n\n" + _qq_protocol_cache["text"]
+    except Exception as e:
+        logger.warning("[chat] QQ 协议文件读取失败: %s", e)
+    return ""
+
+
 # 主动聊天兜底台词池（LLM 返回空时随机选一条）
 _PROACTIVE_FALLBACKS = [
     # ── 日常关心 ──
@@ -614,6 +639,7 @@ async def chat_ws(ws: WebSocket):
                 # ─── 普通对话 ───────────────────────────────────────
                 if msg_type == "chat":
                     content = msg.get("content", "").strip()
+                    channel = msg.get("channel", "")
                     if not content:
                         continue
 
@@ -684,6 +710,10 @@ async def chat_ws(ws: WebSocket):
                     an_text = build_authors_note(
                         persona, mode=mode, daily_unlocked=daily_unlocked, sam_sub_tone=sam_sub_tone
                     )
+                    # QQ 通道协议（CONTRACTS §4「按端风格生成」：生成侧收到 channel，
+                    # 注入 QQ 严格消息格式 + 档位上限，追加在 author's note 区为最高优先级）
+                    if channel == "qq":
+                        an_text = an_text + _qq_protocol_block()
                     an_msg = LLMMessage(role="system", content=an_text)
                     messages = [LLMMessage(role="system", content=system_prompt), *trimmed, an_msg]
 

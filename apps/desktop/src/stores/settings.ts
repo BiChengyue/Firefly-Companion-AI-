@@ -42,11 +42,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const llmMaxTokens = ref(loadNum('firefly_llm_max_tokens', 4096))
   const llmTemperature = ref(loadNum('firefly_llm_temperature', 0.8))
   const llmEnableThinking = ref(loadBool('firefly_llm_enable_thinking', false))
-  const serverUrl = ref(loadStr('firefly_server_url', 'ws://127.0.0.1:8765'))
+  // 总线地址（PROTOCOL.md v1：ws://<bus-host>:8767/ws/desktop）；httpBase 仍指 companion 资源（头像/会话历史）
+  const serverUrl = ref(loadStr('firefly_server_url', 'ws://100.111.201.71:8767/ws/desktop'))
   const httpBaseUrl = ref(loadStr('firefly_http_base', 'http://127.0.0.1:8765'))
 
   // ── 网络设置 ───────────────────────────────────────
-  const wsPort = ref(loadStr('firefly_ws_port', '8765'))
+  const wsPort = ref(loadStr('firefly_ws_port', '8767'))
   const reconnectDelay = ref(loadNum('firefly_reconnect_delay', 5000))
 
   // ── 语音设置 ───────────────────────────────────────

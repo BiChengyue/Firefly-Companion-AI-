@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pch.local/contracts/action.schema.json",
+  "title": "受限动作（策略引擎 → 特权 Broker）",
+  "description": "已批准、可逆、影响受限的执行动作。高风险操作（部署/删改/系统级）不在此列，走 SSH/RDP。",
+  "type": "object",
+  "required": ["action_id", "action_type", "decided_at", "approved", "reversible", "audit"],
+  "properties": {
+    "action_id": { "type": "string" },
+    "action_type": {
+      "enum": [
+        "restart_whitelisted_service", "start_whitelisted_service", "stop_whitelisted_service",
+        "read_server_metric", "read_project_status", "schedule_reminder", "none"
+      ]
+    },
+    "decided_at": { "type": "string", "format": "date-time" },
+    "approved": { "type": "boolean", "default": false, "description": "策略引擎显式批准；默认 false（只读审计，不执行）" },
+    "reversible": { "type": "boolean", "description": "必须可逆；不可逆动作禁止" },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]+$", "description": "白名单服务名（防命令注入）" },
+        "metric": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]+$" },
+        "duration_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "audit": { "type": "string", "description": "动作来源（intent_id/策略规则/人工）" }
+  },
+  "additionalProperties": false
+}

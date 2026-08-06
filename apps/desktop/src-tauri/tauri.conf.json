@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "C:\\Users\\Fireflylover\\AppData\\Roaming\\npm\\pnpm.cmd dev",
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
@@ -47,9 +47,6 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "resources": {
-      "../../server/dist/firefly-server": "firefly-server/"
-    },
     "windows": {
       "nsis": {
         "installMode": "currentUser"

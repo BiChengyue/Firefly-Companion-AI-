@@ -1,0 +1,17 @@
+{
+  "$id": "https://pch.local/contracts/error-codes.json",
+  "title": "统一错误码",
+  "description": "PCH 各层返回的错误码枚举；流萤只得到友好文本，不暴露内部细节。",
+  "error_codes": [
+    { "code": "INVALID_SIGNATURE", "http": 401, "message": "设备签名校验失败" },
+    { "code": "REPLAY_DETECTED", "http": 409, "message": "事件重复或时间戳越界" },
+    { "code": "SCOPE_DENIED", "http": 403, "message": "采集授权域未开通" },
+    { "code": "DEVICE_REVOKED", "http": 403, "message": "设备已撤销" },
+    { "code": "EXPIRED_CONTEXT", "http": 410, "message": "上下文已过期" },
+    { "code": "UNKNOWN_STATE", "http": 422, "message": "数据不足，无法推断状态" },
+    { "code": "INSUFFICIENT_DATA", "http": 422, "message": "样本不足" },
+    { "code": "ACTION_NOT_APPROVED", "http": 403, "message": "动作未获策略批准" },
+    { "code": "ACTION_NOT_REVERSIBLE", "http": 403, "message": "不可逆动作被拒绝" },
+    { "code": "INVALID_PAYLOAD", "http": 400, "message": "载荷不符合契约" }
+  ]
+}

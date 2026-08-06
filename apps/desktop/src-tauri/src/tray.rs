@@ -29,8 +29,6 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "quit" => {
-                let state = app.state::<crate::sidecar::SidecarState>();
-                crate::sidecar::kill_all_backend_processes(&state);
                 app.exit(0);
             }
             _ => {}

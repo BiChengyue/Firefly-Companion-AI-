@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pch.local/contracts/event.schema.json",
+  "title": "设备事件上报",
+  "description": "设备/数据源 → 控制中心 Ingress 的统一事件。传输层携带签名与时间戳窗口，本 schema 只约束事件本体。",
+  "type": "object",
+  "required": ["event_id", "device_id", "device_type", "scope", "event_type", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "UUID v4；配合 occurred_at 做重放防护" },
+    "device_id": { "type": "string", "minLength": 8, "maxLength": 128, "description": "设备注册后的稳定身份" },
+    "device_type": { "enum": ["computer", "phone", "watch", "plan-source", "sensor", "simulator"] },
+    "scope": { "type": "string", "description": "采集授权域，如 presence/location-session/calendar/fitness-summary；未授权 scope 拒绝" },
+    "event_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "occurred_at": { "type": "string", "format": "date-time", "description": "事件发生时间；与接收时间偏差超过窗口则丢弃" },
+    "payload": { "type": "object", "additionalProperties": true, "description": "事件载荷；敏感内容必须已在设备侧脱敏/密文信封" }
+  },
+  "additionalProperties": false
+}

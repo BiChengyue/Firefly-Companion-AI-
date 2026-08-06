@@ -1,17 +1,35 @@
 /**
- * WebSocket 消息处理器 — 从 App.vue 抽取，处理所有 20 种 WS 消息类型。
+ * WebSocket 消息处理器 — 从 App.vue 抽取，处理所有 WS 消息类型。
+ * 总线协议（PROTOCOL.md v1）：bus 回 `ack`（入 inbox 确认）、`device_command`（说做分离动作）。
  * 减少 App.vue 体积（612 → ~500 行），提升可维护性。
  */
 import { useCompanionStore } from '@/stores/companion'
 import { wsClient } from '@/services/ws'
 import { useReminderScheduler } from '@/composables/useReminderScheduler'
-import type { WsServerMessage } from '@shared/index'
+import { showToast } from '@/composables/useToast'
+import type { WsDeviceCommand, WsServerMessage } from '@shared/index'
 
 interface WsHandlerCallbacks {
   /** 收到语音 URL 时回调 */
   onVoice: (url: string, text: string) => void
   /** 模式切换过场台词 */
   onTransitionLine: (line: string, toMode: 'daily' | 'work') => void
+}
+
+/** 说做分离动作（§13.4）：本期只做「通知」类，其余显示提示不执行（执行待 C-3/后续） */
+function handleDeviceCommand(command: WsDeviceCommand) {
+  const { kind, payload } = command
+  const summary = String(
+    (payload && (payload.message ?? payload.text ?? payload.title)) || '',
+  ).slice(0, 60)
+  switch (kind) {
+    case 'notify':
+      showToast(summary || `新通知（${command.id}）`, 'info')
+      break
+    default:
+      showToast(`收到指令 ${kind}（本期不执行）${summary ? `：${summary}` : ''}`, 'info')
+      break
+  }
 }
 
 export function useWsHandler(callbacks: WsHandlerCallbacks) {
@@ -21,6 +39,12 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
     switch (msg.type) {
       // ── 服务端 ACK：已收到消息，立即展示思考指示 ──
       case 'ack_received':
+        companion.startThinking()
+        companion.clearError()
+        break
+
+      // 总线协议：bus 确认用户消息已入 inbox（PROTOCOL.md）
+      case 'ack':
         companion.startThinking()
         companion.clearError()
         break
@@ -48,6 +72,7 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
       case 'error':
         companion.isThinking = false
         companion.setError(msg.message)
+        showToast(msg.message, 'error')
         if (companion.streaming) {
           companion.finishStreaming({
             id: `err-${Date.now()}`,
@@ -88,6 +113,11 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
           (msg as any).motion,
           (msg as any).expression,
         )
+        break
+
+      // 说做分离动作（PROTOCOL.md v1 / CONTRACTS §13.4）：本期只做「通知」类，其余提示不执行
+      case 'device_command':
+        handleDeviceCommand(msg.command)
         break
 
       case 'reminder_created':

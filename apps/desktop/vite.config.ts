@@ -23,10 +23,10 @@ export default defineConfig({
     },
     proxy: {
       // 把 API / 静态资源请求代理到 Python 后端，避免 CORS 跨域问题
-      '/api': 'http://127.0.0.1:8765',
-      '/health': 'http://127.0.0.1:8765',
-      '/memes': 'http://127.0.0.1:8765',
-      '/user-memes': 'http://127.0.0.1:8765',
+      '/api': 'http://100.111.201.71:8765',
+      '/health': 'http://100.111.201.71:8765',
+      '/memes': 'http://100.111.201.71:8765',
+      '/user-memes': 'http://100.111.201.71:8765',
     },
   },
 })

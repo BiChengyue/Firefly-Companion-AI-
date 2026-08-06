@@ -61,3 +61,8 @@ exclude_also = [
     "raise NotImplementedError",
     "def __repr__",
 ]
+
+# flat-layout 修复：仓库根既有 apps/ 又有 app/ 包，不显式 include 时
+# setuptools 会把 apps/ 误判为命名空间包，导致 `pip install -e .` 装不上。
+[tool.setuptools.packages.find]
+include = ["app*"]

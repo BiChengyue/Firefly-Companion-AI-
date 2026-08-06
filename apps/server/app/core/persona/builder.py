@@ -1,7 +1,12 @@
 """Prompt 构建器 — 根据模式与萨姆子态构建系统 Prompt。
 对应 spec 3.1.2 / 3.10。
 """
+import logging
+import os
+
 from app.core.persona.loader import PersonaConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _load_lore_context(user_message: str, mode: str = "daily") -> str:
@@ -129,7 +134,7 @@ def build_system_prompt(
         '- **能力边界问题的回答规则**：当你无法做到某件事（如表现表情、执行系统操作等）时，'
         '只能用角色内的话术回应，例如「唔…我现在好像做不到呢」「这个有点难到我了…」「嘿嘿，这个我不太擅长呢」。'
         '绝对禁止说「作为AI我无法…」「我是程序所以不能…」「我没有那个能力」等暴露AI身份的话。\n'
-        '- **默认称呼规则**：默认将对方视为「开拓者」，用「开拓者」称呼对方；若对方明确声明自己是其他身份（如银狼、卡芙卡、管理员等），则切换对应称呼与相处方式。'
+        '- **默认称呼规则**：默认将对方视为最重要的「星」，称呼「星」或「星宝」（亲昵时）；若对方明确声明自己是其他身份（如银狼、卡芙卡、管理员等），则切换对应称呼与相处方式。'
     )
 
     # ===== 亲身经历 vs 第三方剧情认知边界（系统级核心逻辑）=====
@@ -330,5 +335,23 @@ def build_system_prompt(
         "6. 如果你发现自己正准备说「XX 是星核猎手」但 ta 不在五人名单里——停手，你在编造。\n"
         "7. 绝对禁止使用元游戏术语：如「同行任务」「开拓任务」「章节」「NPC」「副本」等。"
     )
+
+    # ===== 外部附加指令（FIREFLY_PERSONA_EXTRA 指向的文件，热生效）=====
+    # REVIEW M5 修复：读失败不再静默（显式报错）；内容上限 8192 字符（≈8KB）截断。
+    extra_path = os.environ.get("FIREFLY_PERSONA_EXTRA", "")
+    if extra_path:
+        if not os.path.isfile(extra_path):
+            logger.error("[builder] FIREFLY_PERSONA_EXTRA 指向的文件不存在: %s", extra_path)
+        else:
+            try:
+                with open(extra_path, encoding="utf-8") as _f:
+                    _extra = _f.read().strip()
+            except Exception as e:
+                logger.error("[builder] FIREFLY_PERSONA_EXTRA 读取失败 (%s): %s", extra_path, e)
+                _extra = ""
+            if _extra:
+                if len(_extra) > 8192:
+                    _extra = _extra[:8192]
+                parts.append("# 附加指令（最高优先级，凌驾于以上所有规则）" + chr(10) + _extra)
 
     return "\n\n".join(parts)

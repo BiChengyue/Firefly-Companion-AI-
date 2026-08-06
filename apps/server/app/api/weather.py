@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["weather"])
 
 _GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
+# 内置中国城市坐标表（open-meteo geocoding 未收录的区县级地名）
+# 格式：{城市名: (纬度, 经度)}
+_CN_CITIES: dict[str, tuple[float, float]] = {
+    "文登": (37.196, 122.057),      # 山东威海文登区
+    "文登区": (37.196, 122.057),
+    "荣成": (37.165, 122.487),      # 山东威海荣成市
+    "乳山": (36.920, 121.540),      # 山东威海乳山市
+}
 _FC_URL = "https://api.open-meteo.com/v1/forecast"
 _TIMEOUT = 12.0
 
@@ -66,24 +75,40 @@ def _num(v) -> str:
 @router.get("/weather")
 async def get_weather(city: str = Query(..., min_length=1, description="城市名，如 上海")):
     """获取指定城市的实时天气（经 open-meteo 免费接口，无需 Key）。"""
-    # ① 地理编码：城市名 → 经纬度
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-            geo = await client.get(
-                _GEO_URL,
-                params={"name": city, "count": 1, "language": "zh", "format": "json"},
-            )
-            geo.raise_for_status()
-            geo_data = geo.json()
-    except Exception as e:
-        logger.warning("[weather] 地理编码失败 (%s): %s", city, e)
-        raise HTTPException(status_code=502, detail="天气服务暂不可用(地理编码)")
+    # ① 内置中国城市坐标表优先（open-meteo 对区县级中文地名覆盖差）
+    loc0 = _CN_CITIES.get(city)
+    if loc0 is not None:
+        lat, lon = loc0
+        loc = {"name": city, "latitude": lat, "longitude": lon}
+    else:
+        # ② 地理编码：城市名 → 经纬度（中国优先 + 名字精确匹配，避免同名城市取错）
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+                geo = await client.get(
+                    _GEO_URL,
+                    params={"name": city, "count": 10, "language": "zh", "format": "json"},
+                )
+                geo.raise_for_status()
+                geo_data = geo.json()
+        except Exception as e:
+            logger.warning("[weather] 地理编码失败 (%s): %s", city, e)
+            raise HTTPException(status_code=502, detail="天气服务暂不可用(地理编码)")
 
-    results = (geo_data or {}).get("results") or []
-    if not results:
-        raise HTTPException(status_code=404, detail=f"未找到城市: {city}")
-    loc = results[0]
-    lat, lon = loc["latitude"], loc["longitude"]
+        results = (geo_data or {}).get("results") or []
+        if not results:
+            raise HTTPException(status_code=404, detail=f"未找到城市: {city}")
+
+        def _is_cn(r: dict) -> bool:
+            c = (r.get("country") or "") + str(r.get("country_code") or "")
+            return "中国" in c or "China" in c or c.endswith("CN")
+
+        cn = [r for r in results if _is_cn(r)]
+        pool = cn or results
+        # 名字精确匹配优先（含「区/县/市」后缀）
+        names = {city, city + "区", city + "县", city + "市"}
+        exact = [r for r in pool if r.get("name") in names]
+        loc = (exact or pool)[0]
+        lat, lon = loc["latitude"], loc["longitude"]
 
     # ② 取实时天气 + 今日最高/最低温
     try:
