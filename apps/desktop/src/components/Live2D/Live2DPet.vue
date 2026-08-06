@@ -701,7 +701,10 @@ onUnmounted(() => {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   pointer-events: none;
   z-index: 100;
-  max-width: calc(100% - 16px);
+  /* 2026-08-06：气泡宽度不再跟随短内容（内容短时气泡过窄）；
+     固定占满窗口宽度（留 8px 边距），观感大气且完整显示 */
+  width: calc(100% - 16px);
+  min-width: 120px;
   white-space: normal;
   text-align: center;
   line-height: 1.5;
