@@ -682,24 +682,26 @@ onUnmounted(() => {
   outline: none !important;
 }
 
-/* 浮动提示气泡样式 */
+/* 浮动提示气泡样式（2026-08-06 调整：顶部居中会压住模型头部；
+   改底部居中 + 宽度收进窗口——pet 窗口 220px，原 max-width 260 溢出被裁剪） */
 .hit-toast {
   position: absolute;
-  top: 14px;
+  bottom: 8px;
+  top: auto;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(30, 43, 35, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: #ffffff;
-  padding: 6px 14px;
+  padding: 5px 10px;
   border-radius: 20px;
   font-size: 12px;
   font-weight: 500;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   pointer-events: none;
   z-index: 100;
-  max-width: 260px;
+  max-width: calc(100% - 16px);
   white-space: normal;
   text-align: center;
   line-height: 1.5;
@@ -714,6 +716,6 @@ onUnmounted(() => {
 .toast-fade-enter-from,
 .toast-fade-leave-to {
   opacity: 0;
-  transform: translate(-50%, -10px) scale(0.95);
+  transform: translate(-50%, 10px) scale(0.95);
 }
 </style>
