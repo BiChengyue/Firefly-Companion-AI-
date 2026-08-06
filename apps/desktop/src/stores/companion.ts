@@ -271,6 +271,20 @@ export const useCompanionStore = defineStore('companion', () => {
     } catch {}
   }
 
+  /**
+   * 本轮生成完成复位（T-20 切单轨配套，2026-08-06）：
+   * bus 以完整消息（proactive_speech）回包、不发流式 done → 收到即视为本轮结束，
+   * 复位 isThinking/streaming 与 90s 计时器，避免按钮卡「停止」。
+   */
+  function settleRound() {
+    clearGenerationTimer()
+    isThinking.value = false
+    streaming.value = false
+    agentRunning.value = false
+    currentStreamText.value = ''
+    thinkingStore.clearThinking()
+  }
+
   // ── 生成超时/异常兜底（T-15）：发送后 90s 未复位 → 强制复位，避免按钮卡死 ──
   const GENERATION_TIMEOUT_MS = 90000
   let generationTimer: number | null = null
@@ -909,6 +923,7 @@ async function renameSession(id: string, title: string) {
     addConcernMessage,
     addProactiveSpeech,
     startStreaming,
+    settleRound,
     appendToken,
     appendThinking,
     appendPlanning,

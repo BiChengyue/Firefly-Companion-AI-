@@ -100,6 +100,9 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
         break
 
       case 'proactive_speech':
+        // T-20 切单轨：bus 以完整消息回包（不发流式 done）→ 收到即本轮结束，
+        // 先复位 isThinking/streaming，避免按钮卡「停止」
+        companion.settleRound()
         companion.addProactiveSpeech(
           msg.content,
           (msg as any).motion,

@@ -488,7 +488,19 @@ onMounted(async () => {
       core.Memory.initializeAmountOfMemory = () => {}
     }
 
-    const url = 'http://127.0.0.1:8765/static/live2d/firefly/firefly.model3.json'
+    // 模型来源（T-20 切单轨配套，2026-08-06）：桌宠（电脑端）加载服务器 companion 的
+    // Live2D 模型。原硬编码 127.0.0.1:8765 只对「桌宠与后端同机」成立，改造后后端在
+    // Tailnet 服务器 → 改指向服务器；可用 localStorage `firefly_model_base` 覆盖。
+    let modelBase = 'http://100.111.201.71:8765'
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem('firefly_model_base')
+        if (saved) modelBase = saved
+      }
+    } catch {
+      // localStorage 不可用 → 用默认
+    }
+    const url = `${modelBase}/static/live2d/firefly/firefly.model3.json`
     model = await Live2DModel.from(url, { ticker: app.ticker })
 
     model.autoBreath = true
