@@ -37,6 +37,41 @@ export function resolveBusWsUrl(): string {
   return base
 }
 
+// T-20 切单轨配套：启动时经 Tauri invoke 从配置文件（%APPDATA%\firefly-desktop\bus-token.txt）
+// 预载 bus token 到 localStorage，使 resolveBusWsUrl() 自动带上 ?token=。
+// 纯浏览器/测试环境无 __TAURI__ → 静默跳过（仍可用 localStorage 手动配置）。
+// 修复（2026-08-06）：先取 invoke 引用再判空 + 整体 try/catch——
+// 桌宠未开 withGlobalTauri 时 window.__TAURI__ 为 undefined，链式 .then 会抛 TypeError
+// 中断模块加载，导致整个前端崩溃（main 白屏 + pet 透明无 Live2D）。
+if (typeof window !== 'undefined') {
+  try {
+    const tauri = (
+      window as {
+        __TAURI__?: { core?: { invoke?: (cmd: string) => Promise<unknown> } }
+      }
+    ).__TAURI__
+    const invoke = tauri?.core?.invoke
+    if (invoke) {
+      invoke('read_bus_token')
+        .then((t: unknown) => {
+          if (typeof t === 'string' && t) {
+            try {
+              localStorage.setItem('firefly_bus_ws_token', t)
+              console.log('[WS] 已从配置文件载入 bus token')
+            } catch {
+              // localStorage 不可用 → 忽略
+            }
+          }
+        })
+        .catch(() => {
+          // 配置文件不存在/command 未注册 → 忽略
+        })
+    }
+  } catch {
+    // 非 Tauri 环境/异常 → 忽略（绝不中断模块加载）
+  }
+}
+
 /**
  * WebSocket 客户端 — 连接消息总线 bus（PROTOCOL.md：/ws/desktop）
  * - 指数退避重连（1s → 2s → 4s → 8s → 16s → 30s 上限）
@@ -45,6 +80,7 @@ export function resolveBusWsUrl(): string {
 export class WsClient {
   private ws: WebSocket | null = null
   private url: string
+  private dynamicUrl: boolean
   private handlers: Set<MessageHandler> = new Set()
   private statusHandlers: Set<StatusHandler> = new Set()
   private reconnectTimer: number | null = null
@@ -56,8 +92,11 @@ export class WsClient {
   private readonly BASE_DELAY = 1000
   private readonly HEARTBEAT_INTERVAL = 10000
 
-  constructor(url: string = DEFAULT_BUS_WS_URL) {
-    this.url = url
+  constructor(url?: string) {
+    // 显式传 URL（测试）→ 固定使用；未传（生产）→ 动态解析（每次重连重新 resolve，
+    // 使 localStorage / 配置文件 token 变更即时生效，T-20 切单轨配套）
+    this.dynamicUrl = url === undefined
+    this.url = url ?? resolveBusWsUrl()
   }
 
   get status(): WsStatus {
@@ -97,6 +136,7 @@ export class WsClient {
     if (this.ws?.readyState === WebSocket.OPEN) return
     this._manualClose = false
     this.setStatus('connecting')
+    if (this.dynamicUrl) this.url = resolveBusWsUrl()
     this.ws = new WebSocket(this.url)
     this.ws.onopen = () => {
       console.log('[WS] 已连接', this.url)
