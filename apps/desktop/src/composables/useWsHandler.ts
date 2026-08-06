@@ -37,15 +37,17 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
 
   function handleWsMessage(msg: WsServerMessage) {
     switch (msg.type) {
-      // ── 服务端 ACK：已收到消息，立即展示思考指示 ──
+      // ── 服务端 ACK：已收到消息，立即展示思考指示 + 启动生成超时计时（T-15）──
       case 'ack_received':
         companion.startThinking()
+        companion.startGenerationTimer()
         companion.clearError()
         break
 
       // 总线协议：bus 确认用户消息已入 inbox（PROTOCOL.md）
       case 'ack':
         companion.startThinking()
+        companion.startGenerationTimer()
         companion.clearError()
         break
 
@@ -70,17 +72,7 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
         break
 
       case 'error':
-        companion.isThinking = false
-        companion.setError(msg.message)
-        showToast(msg.message, 'error')
-        if (companion.streaming) {
-          companion.finishStreaming({
-            id: `err-${Date.now()}`,
-            role: 'assistant',
-            content: companion.currentStreamText || '',
-            createdAt: Date.now(),
-          })
-        }
+        companion.handleGenerationError(msg.message)
         break
 
       // ── 多媒体 ──
@@ -184,6 +176,12 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
 
     wsClient.onStatus((status) => {
       companion.setWsConnected(status === 'open')
+      // T-15：WS 断开/出错时若仍处于生成中 → 强制复位 + Toast，避免按钮卡死（重连后不卡）
+      if (status === 'closed' || status === 'error') {
+        if (companion.streaming || companion.isThinking || companion.agentRunning) {
+          companion.forceResetGeneration('连接已断开')
+        }
+      }
     })
 
     wsClient.onMessage(handleWsMessage)

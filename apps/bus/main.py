@@ -32,7 +32,7 @@ from bus.dispatcher import Dispatcher  # noqa: E402
 from bus.event_bridge import EventBridge  # noqa: E402
 from bus.input_bus import InputBus  # noqa: E402
 from bus.reachability import ReachabilityTracker  # noqa: E402
-from bus.scheduler import Scheduler  # noqa: E402
+from bus.scheduler import DeadLetterNotifier, Scheduler  # noqa: E402
 from bus.store import BusStore  # noqa: E402
 from bus.ws_server import DesktopHub, start_desktop_ws_thread  # noqa: E402
 
@@ -41,6 +41,15 @@ _log = logging.getLogger("bus.main")
 
 
 def main():
+    # T-25 🟠6：QQ 兜底凭据缺失 → 启动即告警（防「缺凭据静默失效」；桌宠在线不受影响，
+    # 但 QQ 兜底与死信通知会静默失效——切单轨前必须由 install.ps1 注入）
+    missing_qq = [k for k in ("QBOT_APPID", "QBOT_SECRET", "QBOT_OPENID") if not os.environ.get(k)]
+    if missing_qq:
+        _log.warning(
+            "QQ 兜底通道未配置（缺 %s）——QQ 兜底投递与死信通知将静默失效（T-25 🟠6）",
+            ", ".join(missing_qq),
+        )
+
     store = BusStore()
     input_bus = InputBus(store)
     tracker = ReachabilityTracker()
@@ -53,7 +62,7 @@ def main():
     ])
     dispatcher = Dispatcher(store, adapter)
     bridge = CompanionBridge()
-    scheduler = Scheduler(store, bridge, dispatcher, tracker)
+    scheduler = Scheduler(store, bridge, dispatcher, tracker, notifier=DeadLetterNotifier(hub=hub, qq_adapter=adapter))
 
     # 入站 HTTP API（qbot 适配器 / 备用入口）
     http_port = int(os.environ.get("BUS_PORT", "8766"))
@@ -62,9 +71,17 @@ def main():
     threading.Thread(target=http_srv.serve_forever, name="bus-http", daemon=True).start()
     _log.info("inbound http on %s:%s", http_bind, http_port)
 
-    # 桌宠 WS 服务（用户消息 + 心跳 + mode_switch + 推送）
+    # 桌宠 WS 服务（用户消息 + 心跳 + mode_switch + cancel + 旧协议控制 + 推送）
     ws_port = int(os.environ.get("BUS_WS_PORT", "8767"))
-    start_desktop_ws_thread(tracker, input_bus, mode_switch_fn=bridge.switch_mode_sync, hub=hub, port=ws_port)
+    start_desktop_ws_thread(
+        tracker, input_bus,
+        mode_switch_fn=bridge.switch_mode_sync,
+        cancel_fn=bridge.cancel_sync,
+        control_fn=bridge.send_control_sync,
+        voice_toggle_fn=bridge.set_tts_enabled,
+        hub=hub,
+        port=ws_port,
+    )
     _log.info("desktop ws on :%s/ws/desktop", ws_port)
 
     # 事件桥（hub 轮询）+ 调度循环

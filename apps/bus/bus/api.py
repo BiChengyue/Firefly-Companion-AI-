@@ -32,13 +32,22 @@ def _bus_token() -> str:
     return os.environ.get("BUS_TOKEN", "")
 
 
+def _is_loopback(ip: str) -> bool:
+    return ip in ("127.0.0.1", "::1")
+
+
 def _auth_ok(handler) -> bool:
-    """X-Bus-Token 校验；未配置 BUS_TOKEN 时放行（内部进程默认本机访问）。"""
+    """X-Bus-Token 校验（🟠14 绑定收紧）。
+
+    - 配置 BUS_TOKEN：恒定时间比较。
+    - 未配置 BUS_TOKEN：仅放行本地回环请求（127.0.0.1/::1）——入站 API 不对外网开放，
+      防止「无 token 完全放行」的静默暴露（内部进程默认本机访问语义显式化）。
+    """
     expected = _bus_token()
-    if not expected:
-        return True
-    got = handler.headers.get("X-Bus-Token", "")
-    return hmac.compare_digest(got, expected)
+    if expected:
+        got = handler.headers.get("X-Bus-Token", "")
+        return hmac.compare_digest(got, expected)
+    return _is_loopback(handler.client_address[0])
 
 
 class BusHttpHandler(BaseHTTPRequestHandler):

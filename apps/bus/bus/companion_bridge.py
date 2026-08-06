@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,7 +44,12 @@ def resolve_session_id(source: MessageSource, meta: dict | None) -> str:
 
 
 class CompanionBridge:
-    """调 companion /ws/chat 生成回复。每条消息独立建连（同旧 companion.py）。"""
+    """调 companion /ws/chat 生成回复。每条消息独立建连（同旧 companion.py）。
+
+    T-13 cancel：generate 期间登记活跃连接；cancel_sync 向活跃连接发 {"type":"cancel"}
+    （companion chat.py 已支持 request_cancel 中止生成）；被取消后调度线程
+    consume_cancelled() 标记消息 cancelled、不投递半成品。
+    """
 
     def __init__(
         self,
@@ -56,42 +62,91 @@ class CompanionBridge:
         self.timeout = timeout
         self.tts_enabled = tts_enabled  # 本期默认关 TTS（语音接线 D3 后置）
         self.http_url = http_url or DEFAULT_COMPANION_HTTP
+        self._lock = threading.Lock()
+        self._active_ws = None            # 当前活跃生成的连接（单槽：调度线程逐条处理）
+        self._active_loop = None          # 活跃连接所属事件循环
+        self._cancelled = False           # 最近一次生成是否被 cancel
 
-    async def generate(self, content: str, session_id: str, channel: str | None = None) -> str:
+    async def generate(
+        self,
+        content: str,
+        session_id: str,
+        channel: str | None = None,
+        workspace_path: str | None = None,
+    ) -> str:
         """发一条消息到 companion，返回完整回复文本。异常抛 RuntimeError。"""
         async with websockets.connect(self.ws_url, open_timeout=15, max_size=4 * 1024 * 1024) as ws:
-            await ws.send(json.dumps({"type": "voice_toggle", "enabled": self.tts_enabled}))
-            chat_msg: dict = {"type": "chat", "content": content, "sessionId": session_id}
-            if channel:
-                chat_msg["channel"] = channel
-            await ws.send(json.dumps(chat_msg))
-            parts: list[str] = []
-            while True:
-                raw = await asyncio.wait_for(ws.recv(), timeout=self.timeout)
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                t = msg.get("type")
-                if t == "token":
-                    delta = msg.get("delta", "")
-                    if delta:
-                        parts.append(delta)
-                elif t == "done":
-                    full = (msg.get("message") or {}).get("content") or ""
-                    if full:
-                        return full
-                    return "".join(parts) or "（没有回复）"
-                elif t == "error":
-                    raise RuntimeError(msg.get("message", "companion error"))
+            with self._lock:
+                self._active_ws = ws
+                self._active_loop = asyncio.get_running_loop()
+            try:
+                await ws.send(json.dumps({"type": "voice_toggle", "enabled": self.tts_enabled}))
+                chat_msg: dict = {"type": "chat", "content": content, "sessionId": session_id}
+                if channel:
+                    chat_msg["channel"] = channel
+                if workspace_path:  # 旧协议透传（T-17 🟠5）：companion Agent 分支据此切换工作目录
+                    chat_msg["workspacePath"] = workspace_path
+                await ws.send(json.dumps(chat_msg))
+                parts: list[str] = []
+                while True:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=self.timeout)
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    t = msg.get("type")
+                    if t == "token":
+                        delta = msg.get("delta", "")
+                        if delta:
+                            parts.append(delta)
+                    elif t == "done":
+                        full = (msg.get("message") or {}).get("content") or ""
+                        if full:
+                            return full
+                        return "".join(parts) or "（没有回复）"
+                    elif t == "error":
+                        raise RuntimeError(msg.get("message", "companion error"))
+            finally:
+                with self._lock:
+                    self._active_ws = None
+                    self._active_loop = None
 
-    def generate_sync(self, content: str, session_id: str, channel: str | None = None) -> str:
+    def generate_sync(
+        self,
+        content: str,
+        session_id: str,
+        channel: str | None = None,
+        workspace_path: str | None = None,
+    ) -> str:
         """调度线程同步入口（每条消息独立事件循环建连）。"""
         try:
-            return asyncio.run(self.generate(content, session_id, channel))
+            return asyncio.run(self.generate(content, session_id, channel, workspace_path=workspace_path))
         except Exception as e:
             _log.warning("companion generate failed: %s", e)
             raise
+
+    def send_control_sync(self, msg: dict) -> bool:
+        """向活跃生成连接发送控制消息（T-17 🟠5：approval_response/daily_unlock/trigger_proactive）。
+
+        生成中才有活跃连接（companion 的审批/解锁/主动触发均在 /ws/chat 连接内处理）；
+        无活跃连接 → False（调用方回 error「无进行中的生成」）。
+        """
+        with self._lock:
+            ws, loop = self._active_ws, self._active_loop
+            if ws is None or loop is None:
+                return False
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send(json.dumps(msg, ensure_ascii=False)), loop)
+            _log.info("companion control sent: %s", msg.get("type"))
+            return True
+        except Exception as e:
+            _log.warning("companion control send failed: %s", e)
+            return False
+
+    def set_tts_enabled(self, enabled: bool) -> None:
+        """voice_toggle 本地降级（T-17 🟠5）：更新生成桥 TTS 开关，后续生成按此发送 voice_toggle。"""
+        self.tts_enabled = bool(enabled)
+        _log.info("companion tts_enabled -> %s", self.tts_enabled)
 
     def switch_mode_sync(self, mode: str) -> dict:
         """切换 companion 全局模式（T-03R：桌宠 mode_switch → POST /api/mode?mode=...）。
@@ -109,3 +164,35 @@ class CompanionBridge:
         except Exception as e:
             _log.warning("companion mode switch failed: %s", e)
             return {"error": str(e)}
+
+    def cancel_sync(self) -> bool:
+        """中止当前活跃生成（T-13）：向活跃连接的 companion 发 {"type":"cancel"}。
+
+        返回是否有活跃生成被中止（无活跃 → 静默，返回 False，与 companion 语义对齐）。
+        跨线程：活跃连接在调度线程的事件循环，用 run_coroutine_threadsafe 投递。
+        T-23 🔴3：**发送成功后再置 _cancelled 标志**——send 失败不置标志（消息不被误标
+        cancelled，仍正常投递）。
+        """
+        with self._lock:
+            ws, loop = self._active_ws, self._active_loop
+            if ws is None or loop is None:
+                return False
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send(json.dumps({"type": "cancel"})), loop)
+        except Exception as e:
+            _log.warning("companion cancel failed: %s", e)
+            return False  # 发送失败：不置标志（回滚语义），消息照常投递
+        with self._lock:
+            self._cancelled = True  # 发送成功后再置标志
+        _log.info("companion cancel sent (active generation)")
+        return True
+
+    def consume_cancelled(self) -> bool:
+        """读取并清除 cancel 标志（调度线程在 generate_sync 返回后调用）。
+
+        True = 本次生成被用户取消 → 调度线程标记消息 cancelled、不投递半成品。
+        """
+        with self._lock:
+            was = self._cancelled
+            self._cancelled = False
+            return was

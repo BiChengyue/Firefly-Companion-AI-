@@ -24,19 +24,62 @@ MAX_EVENT_AGE = 2 * 3600          # 事件超过 2h 直接丢弃
 BATCH_SIZE = 3                    # 同批最多合并 3 条（E3 批量合并）
 
 
+def resolve_pch_token() -> str:
+    """与 hub-api 鉴权 token 来源完全一致（api_server._token，T-11 修复）。
+
+    优先级：PCH_TOKEN 环境变量 → 令牌文件（PCH_TOKEN_FILE 或默认
+    C:\\ProgramData\\firefly-bot\\pch.token，读明文/解密的 read_secret 兜底）。
+    事件桥与 hub 用同一来源，避免 consumed 401 导致事件重复拉取。
+    """
+    v = os.environ.get("PCH_TOKEN", "")
+    if v:
+        return v
+    for p in (os.environ.get("PCH_TOKEN_FILE", ""), r"C:\ProgramData\firefly-bot\pch.token"):
+        if not p:
+            continue
+        try:
+            # 部署副本的 secretbox 解密（DPAPI 加密的令牌文件），失败退回明文读取
+            import sys
+            from pathlib import Path
+
+            sys.path.insert(0, str(Path(p).resolve().parent))
+            from secretbox import read_secret  # type: ignore
+
+            v = read_secret(p)
+            if v:
+                return str(v).strip()
+        except Exception:
+            try:
+                from pathlib import Path
+
+                raw = Path(p).read_text(encoding="utf-8").strip()
+                if raw:
+                    return raw
+            except OSError:
+                continue
+    return ""
+
+
 class EventBridge:
-    """轮询 hub push_events → 入 inbox。"""
+    """轮询 hub push_events → 入 inbox。
+
+    T-11 修复：hub 的 GET /api/v1/events 用 X-PCH-Token 鉴权（_auth_ok），而
+    POST /api/v1/events/consumed 用 X-Phone-Token 头（对比 PCH_PHONE_TOKEN）——
+    两个端点鉴权头不同，consumed 必须带 X-Phone-Token（否则 401，事件重复拉取）。
+    """
 
     def __init__(
         self,
         input_bus: InputBus,
         hub_url: str | None = None,
         token: str = "",
+        phone_token: str = "",
         poll_seconds: int = POLL_SECONDS,
     ):
         self.input_bus = input_bus
         self.hub_url = (hub_url or os.environ.get("PCH_API_URL", "http://127.0.0.1:8901")).rstrip("/")
-        self.token = token or os.environ.get("PCH_TOKEN", "")
+        self.token = token or resolve_pch_token()                    # GET events（X-PCH-Token）
+        self.phone_token = phone_token or os.environ.get("PCH_PHONE_TOKEN", "")  # consumed（X-Phone-Token）
         self.poll_seconds = poll_seconds
 
     # ── HTTP 原语（与旧 event_worker 同款）──
@@ -50,16 +93,25 @@ class EventBridge:
             _log.warning("hub get %s failed: %s", path, e)
             return None
 
-    def _hub_post(self, path: str, body: dict) -> bool:
+    def _hub_post(self, path: str, body: dict, phone_token: bool = False) -> bool:
+        """POST；phone_token=True 时带 X-Phone-Token 头（consumed/ingest 端点用）。"""
+        headers = {"Content-Type": "application/json"}
+        if phone_token:
+            headers["X-Phone-Token"] = self.phone_token
+        else:
+            headers["X-PCH-Token"] = self.token
         try:
             req = urllib.request.Request(
                 f"{self.hub_url}{path}",
                 data=json.dumps(body).encode(),
-                headers={"Content-Type": "application/json", "X-PCH-Token": self.token},
+                headers=headers,
             )
             with urllib.request.urlopen(req, timeout=8) as r:
                 r.read()
             return True
+        except urllib.error.HTTPError as e:
+            _log.warning("hub post %s failed: http %s", path, e.code)
+            return False
         except Exception as e:
             _log.warning("hub post %s failed: %s", path, e)
             return False
@@ -91,7 +143,7 @@ class EventBridge:
                 continue
             pending.append(ev)
         for eid in consumed_ids:
-            self._hub_post("/api/v1/events/consumed", {"id": eid})
+            self._hub_post("/api/v1/events/consumed", {"id": eid}, phone_token=True)
         if not pending:
             return 0
         # 批量合并：最多 BATCH_SIZE 条融合为一条 hub_event 消息（E3）
@@ -112,10 +164,10 @@ class EventBridge:
         except ValueError as e:  # 白名单校验兜底（不应发生，防死循环）
             _log.warning("hub_event rejected: %s", e)
             for ev in batch:
-                self._hub_post("/api/v1/events/consumed", {"id": ev.get("id")})
+                self._hub_post("/api/v1/events/consumed", {"id": ev.get("id")}, phone_token=True)
             return 0
         for ev in batch:
-            self._hub_post("/api/v1/events/consumed", {"id": ev.get("id")})
+            self._hub_post("/api/v1/events/consumed", {"id": ev.get("id")}, phone_token=True)
         _log.info("enqueued hub_event %s (merged %d, rest %d)", message.id, len(batch), len(rest))
         return 1
 

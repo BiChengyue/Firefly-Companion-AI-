@@ -54,6 +54,8 @@ class EventKind(str, Enum):
     SR_FULL = "sr_full"
     SERVICE_DOWN = "service_down"
     SERVICE_RECOVERED = "service_recovered"
+    SR_SYNC_DOWN = "sr_sync_down"
+    SR_SYNC_OK = "sr_sync_ok"
 
 
 class DeviceCommandKind(str, Enum):

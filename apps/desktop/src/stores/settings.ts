@@ -42,9 +42,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const llmMaxTokens = ref(loadNum('firefly_llm_max_tokens', 4096))
   const llmTemperature = ref(loadNum('firefly_llm_temperature', 0.8))
   const llmEnableThinking = ref(loadBool('firefly_llm_enable_thinking', false))
-  // 总线地址（PROTOCOL.md v1：ws://<bus-host>:8767/ws/desktop）；httpBase 仍指 companion 资源（头像/会话历史）
+  // 总线地址（PROTOCOL.md v1：ws://<bus-host>:8767/ws/desktop）；httpBase 默认与 WS 对齐 Tailnet companion（T-18 🟠6）
   const serverUrl = ref(loadStr('firefly_server_url', 'ws://100.111.201.71:8767/ws/desktop'))
-  const httpBaseUrl = ref(loadStr('firefly_http_base', 'http://127.0.0.1:8765'))
+  const httpBaseUrl = ref(loadStr('firefly_http_base', 'http://100.111.201.71:8765'))
+  // T-18 🟠4：bus WS 鉴权 token（服务端 BUS_WS_TOKEN，可选；resolveBusWsUrl 拼 ?token=）
+  const busWsToken = ref(loadStr('firefly_bus_ws_token', ''))
 
   // ── 网络设置 ───────────────────────────────────────
   const wsPort = ref(loadStr('firefly_ws_port', '8767'))
@@ -135,6 +137,7 @@ export const useSettingsStore = defineStore('settings', () => {
     llmEnableThinking?: boolean
     serverUrl?: string
     httpBaseUrl?: string
+    busWsToken?: string
     wsPort?: string
     reconnectDelay?: number
     voiceProvider?: string
@@ -180,6 +183,10 @@ export const useSettingsStore = defineStore('settings', () => {
     if (settings.httpBaseUrl !== undefined) {
       httpBaseUrl.value = settings.httpBaseUrl
       saveStr('firefly_http_base', settings.httpBaseUrl)
+    }
+    if (settings.busWsToken !== undefined) {
+      busWsToken.value = settings.busWsToken
+      saveStr('firefly_bus_ws_token', settings.busWsToken)
     }
     if (settings.wsPort !== undefined) {
       wsPort.value = settings.wsPort
@@ -234,6 +241,7 @@ export const useSettingsStore = defineStore('settings', () => {
     llmEnableThinking,
     serverUrl,
     httpBaseUrl,
+    busWsToken,
     wsPort,
     reconnectDelay,
     voiceProvider,

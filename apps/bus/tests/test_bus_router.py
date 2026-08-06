@@ -154,7 +154,7 @@ def test_non_whitelist_kind_rejected():
 
 
 def test_all_whitelist_kinds_accepted():
-    """§8 白名单 13 种 kind 全部可入（新增 kind 必须先改契约再改代码）。"""
+    """§8 白名单全部 kind 可入（新增 kind 必须先改契约再改代码）。"""
     from bus.input_bus import InputBus
     from bus.models import EventKind
     from bus.store import BusStore
@@ -166,3 +166,27 @@ def test_all_whitelist_kinds_accepted():
             msg = ib.receive(source=MessageSource.HUB_EVENT, content="x", kind=kind)
             assert msg.kind == kind
         store.close()
+
+
+def test_sr_sync_kinds_whitelisted_and_routable(tmp_path):
+    """T-25 🟠13：sr_sync_down/sr_sync_ok 在 §8 白名单且可路由（与 service_down 一致：非 critical、QQ 可投）。"""
+    from bus.scheduler import is_critical_kind
+
+    assert is_critical_kind("sr_sync_down") is False   # 非 critical（正常优先级）
+    assert is_critical_kind("sr_sync_ok") is False
+    assert is_critical_kind("service_down") is False   # 对照
+
+    from bus.input_bus import InputBus
+    from bus.store import BusStore
+
+    for kind in ("sr_sync_down", "sr_sync_ok"):
+        with tempfile.TemporaryDirectory() as td:
+            store = BusStore(str(td) + "/bus.db")
+            ib = InputBus(store)
+            msg = ib.receive(source=MessageSource.HUB_EVENT, content="x", kind=kind)
+            assert msg.kind.value == kind
+            row = store.get_inbound(msg.id)
+            # 正常优先级：first_reachable 序列（桌面离线 → QQ 兜底可投）
+            assert row["policy"] == "first_reachable"
+            assert row["sequence"].targets[-1].value == "qq"
+            store.close()

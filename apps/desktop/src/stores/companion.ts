@@ -222,12 +222,13 @@ export const useCompanionStore = defineStore('companion', () => {
   }
 
   // === Actions ===
-  function applyModeConfig(config: ModeConfig) {
-    mode.value = config.current
-    theme.value = config.theme
-    hudVisible.value = config.hudVisible
-    thinkVisible.value = config.thinkVisible
-    proactiveCare.value = config.proactiveCare
+  /** 应用模式配置；bus/companion 回包可能缺字段（T-18 🟠3）→ 对 undefined 取默认值兜底 */
+  function applyModeConfig(config: Partial<ModeConfig>) {
+    mode.value = config.current ?? 'daily'
+    theme.value = config.theme ?? { name: 'firefly' }
+    hudVisible.value = config.hudVisible ?? true
+    thinkVisible.value = config.thinkVisible ?? true
+    proactiveCare.value = config.proactiveCare ?? true
   }
 
   function addMessage(msg: ChatMessage) {
@@ -270,6 +271,56 @@ export const useCompanionStore = defineStore('companion', () => {
     } catch {}
   }
 
+  // ── 生成超时/异常兜底（T-15）：发送后 90s 未复位 → 强制复位，避免按钮卡死 ──
+  const GENERATION_TIMEOUT_MS = 90000
+  let generationTimer: number | null = null
+
+  /** 启动生成超时计时器（幂等：先清再设）——发送成功 / bus ack 时调用 */
+  function startGenerationTimer() {
+    clearGenerationTimer()
+    generationTimer = window.setTimeout(() => {
+      generationTimer = null
+      forceResetGeneration('回复超时，可重试')
+    }, GENERATION_TIMEOUT_MS)
+  }
+
+  /** 清除生成超时计时器——收到回复/error/取消/断开时调用 */
+  function clearGenerationTimer() {
+    if (generationTimer !== null) {
+      clearTimeout(generationTimer)
+      generationTimer = null
+    }
+  }
+
+  /** 强制复位全部生成状态（超时/断连兜底），不追加消息 */
+  function forceResetGeneration(message?: string) {
+    clearGenerationTimer()
+    isThinking.value = false
+    streaming.value = false
+    agentRunning.value = false
+    currentStreamText.value = ''
+    thinkingStore.clearThinking()
+    thinkingStore.currentPlanning = ''
+    if (message) showToast(message, 'warning')
+  }
+
+  /** 生成错误兜底（T-15）：清计时器 + 复位生成状态 + 展示错误；流式中保留已生成文本 */
+  function handleGenerationError(message: string) {
+    clearGenerationTimer()
+    isThinking.value = false
+    agentRunning.value = false
+    setError(message)
+    showToast(message, 'error')
+    if (streaming.value) {
+      finishStreaming({
+        id: `err-${Date.now()}`,
+        role: 'assistant',
+        content: currentStreamText.value || '',
+        createdAt: Date.now(),
+      })
+    }
+  }
+
   function startThinking() {
     isThinking.value = true
     streaming.value = false
@@ -297,6 +348,7 @@ export const useCompanionStore = defineStore('companion', () => {
   }
 
   function finishStreaming(msg: ChatMessage) {
+    clearGenerationTimer()
     isThinking.value = false
     streaming.value = false
     currentStreamText.value = ''
@@ -315,6 +367,7 @@ export const useCompanionStore = defineStore('companion', () => {
 
   /** 用户点击终止生成 — 立即重置 UI 状态，等待后端 done 统一处理消息 */
   function cancelGeneration() {
+    clearGenerationTimer()
     isThinking.value = false
     streaming.value = false
     agentRunning.value = false
@@ -865,6 +918,11 @@ async function renameSession(id: string, title: string) {
     clearThinkingHistory: thinkingStore.clearHistory,
     finishStreaming,
     cancelGeneration,
+    // T-15：生成超时/异常兜底
+    startGenerationTimer,
+    clearGenerationTimer,
+    forceResetGeneration,
+    handleGenerationError,
     setPassthrough,
     setInteractionLocked,
     setPetLocked,

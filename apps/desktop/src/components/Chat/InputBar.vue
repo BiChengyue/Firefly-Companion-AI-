@@ -86,7 +86,10 @@ function send(e?: Event) {
     sessionId: companion.activeSessionId ?? undefined,
     workspacePath: companion.activeWorkspace?.path ?? undefined,
   })
-  if (!sent) {
+  if (sent) {
+    // T-15：发送成功即启动生成超时兜底（覆盖 ack 丢失场景；bus ack 到达时会重置计时）
+    companion.startGenerationTimer()
+  } else {
     companion.setError('消息发送失败：WebSocket 未就绪')
   }
   text.value = ''

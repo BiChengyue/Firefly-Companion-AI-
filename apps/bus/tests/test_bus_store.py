@@ -152,3 +152,23 @@ def test_outbound_action_roundtrip(tmp_path):
     )
     row = store.get_outbound("m7")
     assert row["action"] == {"kind": "open_app", "payload": {"app": "maps"}}
+
+
+def test_enqueue_same_id_does_not_reset_processed_status(tmp_path):
+    """T-11 回归：同 id 重复入队（INSERT OR IGNORE）不把已 processed 的消息重置回 pending。
+
+    事件桥 consumed 401 场景下，同一 hub 事件会反复拉取——必须保证已处理消息不被
+    覆盖成 pending 导致反复处理（T-11 问题 2 根治）。
+    """
+    from bus.models import InboundMessage, MessageSource
+
+    store = _store(tmp_path)
+    msg = InboundMessage(id="hub-1", source=MessageSource.HUB_EVENT, kind="low_battery", content="x")
+    seq = DeliverySequence(messageId="hub-1", targets=[DeliveryChannel.QQ], policy=DeliveryPolicy.FIRST_REACHABLE)
+    store.enqueue_inbound(msg, seq)
+    store.mark_inbound("hub-1", "processed")
+    # 同 id 重复入队（事件桥重复拉取）
+    store.enqueue_inbound(msg, seq)
+    row = store.get_inbound("hub-1")
+    assert row["status"] == "processed"  # 不被重置回 pending
+    assert row["attempts"] == 0

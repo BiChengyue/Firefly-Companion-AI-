@@ -99,3 +99,22 @@ def test_token_auth(server, monkeypatch):
     assert code == 401
     code, body = _post(port, "/api/v1/inbound/qq", {"content": "hi"}, token="secret-tok")
     assert code == 200
+
+
+def test_no_token_loopback_only(server, monkeypatch):
+    """T-25 🟠14：未配置 BUS_TOKEN 时入站 API 仅放行本地回环（非本地请求被拒）。"""
+    from bus.api import _auth_ok
+
+    class FakeHandler:
+        def __init__(self, ip, headers=None):
+            self.client_address = (ip, 0)
+            self.headers = headers or {}
+
+    monkeypatch.delenv("BUS_TOKEN", raising=False)
+    assert _auth_ok(FakeHandler("127.0.0.1")) is True   # 本地放行
+    assert _auth_ok(FakeHandler("::1")) is True
+    assert _auth_ok(FakeHandler("100.111.201.71")) is False  # Tailnet 非本地拒绝（HTTP 入站不对外）
+    # 有 token 时按 token 校验（非本地带正确 token 也放行）
+    monkeypatch.setenv("BUS_TOKEN", "t")
+    assert _auth_ok(FakeHandler("100.111.201.71", {"X-Bus-Token": "t"})) is True
+    assert _auth_ok(FakeHandler("100.111.201.71", {})) is False

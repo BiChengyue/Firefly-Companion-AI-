@@ -233,9 +233,11 @@ export type MessageSource = 'qq' | 'desktop' | 'mobile' | 'hub_event'
 /** 输出端目标（CONTRACTS §2） */
 export type DeliveryChannel = 'desktop' | 'mobile_inapp' | 'mobile_notify' | 'qq'
 
-/** Hub push_events.kind 白名单（CONTRACTS §8；新增 kind 必须先改契约再改代码） */
+/** Hub push_events.kind 白名单（CONTRACTS §8；新增 kind 必须先改契约再改代码）。
+ *  low_battery_critical（低电量 10% 二级档）由 T-09 引入（R5）。 */
 export type EventKind =
   | 'low_battery'
+  | 'low_battery_critical'
   | 'home_out'
   | 'home_in'
   | 'leaving_hint'
@@ -248,6 +250,8 @@ export type EventKind =
   | 'sr_full'
   | 'service_down'
   | 'service_recovered'
+  | 'sr_sync_down'
+  | 'sr_sync_ok'
 
 /** 输出侧语音载荷（仅 desktop / mobile_inapp 有效，对齐上游 voice_audio 结构） */
 export interface OutboundVoice {

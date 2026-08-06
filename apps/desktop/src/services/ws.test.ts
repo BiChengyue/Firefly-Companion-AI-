@@ -255,10 +255,33 @@ describe('resolveBusWsUrl — 总线地址解析（localStorage 覆盖）', () =
 
   it('localStorage 有 firefly_server_url 时优先使用（Tailnet 部署覆盖）', () => {
     vi.stubGlobal('localStorage', {
-      getItem: () => 'ws://100.111.201.71:8767/ws/desktop',
+      getItem: (k: string) => (k === 'firefly_server_url' ? 'ws://100.111.201.71:8767/ws/desktop' : null),
       setItem: () => {},
       removeItem: () => {},
     })
     expect(resolveBusWsUrl()).toBe('ws://100.111.201.71:8767/ws/desktop')
+  })
+
+  it('有 firefly_bus_ws_token 时拼接 ?token=（URL 编码）', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => (k === 'firefly_bus_ws_token' ? 's3cr3t/token' : null),
+      setItem: () => {},
+      removeItem: () => {},
+    })
+    expect(resolveBusWsUrl()).toBe('ws://100.111.201.71:8767/ws/desktop?token=s3cr3t%2Ftoken')
+  })
+
+  it('地址已带 query 时 token 用 & 追加', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) =>
+        k === 'firefly_server_url'
+          ? 'ws://host:8767/ws/desktop?x=1'
+          : k === 'firefly_bus_ws_token'
+            ? 't'
+            : null,
+      setItem: () => {},
+      removeItem: () => {},
+    })
+    expect(resolveBusWsUrl()).toBe('ws://host:8767/ws/desktop?x=1&token=t')
   })
 })

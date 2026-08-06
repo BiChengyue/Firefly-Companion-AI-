@@ -3,9 +3,14 @@
 协议（供 C 包 T-06 实现，详见 apps/bus/PROTOCOL.md）：
   连接：ws://<bus-host>:<port>/ws/desktop
   桌宠 → bus：
-    {"type":"chat","content":str,"sessionId"?:str,"refId"?:str}   用户消息入 inbox（source=desktop）
+    {"type":"chat","content":str,"sessionId"?:str,"refId"?:str,"workspacePath"?:str}  用户消息入 inbox（source=desktop；workspacePath 透传 companion）
     {"type":"heartbeat"}                                          10s 心跳（驱动可达性）
     {"type":"mode_switch","mode":"daily"|"work"}                  全局模式切换（§13.2：仅桌宠端可切）
+    {"type":"cancel","refId"?:str}                                终止当前生成中（T-13；无活跃静默忽略）
+    {"type":"approval_response",...}                              审批回复（T-17 🟠5：转发 companion 活跃连接）
+    {"type":"daily_unlock",...}                                   日常模式解锁（T-17 🟠5：转发 companion）
+    {"type":"trigger_proactive",...}                              手动触发主动聊天（T-17 🟠5：转发 companion）
+    {"type":"voice_toggle","enabled":bool}                        语音开关（T-17 🟠5：bus 本地降级设置生成桥 TTS）
     {"type":"voice_input", ...}                                   占位（语音输入，本期不实现）
   bus → 桌宠：
     {"type":"proactive_speech","content":str,"source":"bus","refId"?:str}   主动消息/回复推送
@@ -93,9 +98,12 @@ async def _writer(ws, queue: asyncio.Queue):
             return
 
 
-def make_desktop_handler(hub: DesktopHub, input_bus: InputBus, mode_switch_fn=None):
+def make_desktop_handler(hub: DesktopHub, input_bus: InputBus, mode_switch_fn=None, cancel_fn=None, control_fn=None, voice_toggle_fn=None):
     """mode_switch_fn: callable(mode: str) -> dict（如 CompanionBridge.switch_mode_sync）；
-    None 时 mode_switch 回 error（未配置）。"""
+    None 时 mode_switch 回 error（未配置）。
+    cancel_fn: callable() -> bool（如 CompanionBridge.cancel_sync）；None 时 cancel 静默忽略。
+    control_fn: callable(msg: dict) -> bool（转发旧协议控制消息到 companion 活跃连接，T-17 🟠5）；
+    voice_toggle_fn: callable(enabled: bool)（voice_toggle 本地降级，T-17 🟠5）。"""
     async def handler(ws):
         # 可选鉴权：BUS_WS_TOKEN 设置后需 query ?token= 匹配（恒定时间比较）
         expected = _ws_token()
@@ -127,11 +135,16 @@ def make_desktop_handler(hub: DesktopHub, input_bus: InputBus, mode_switch_fn=No
                     if not content:
                         await queue.put({"type": "error", "message": "content required"})
                         continue
+                    meta: dict = {}
+                    if msg.get("sessionId"):
+                        meta["sessionId"] = msg.get("sessionId")
+                    if msg.get("workspacePath"):  # T-17 🟠5：透传（companion Agent 分支）
+                        meta["workspacePath"] = msg.get("workspacePath")
                     message = input_bus.receive(
                         source=MessageSource.DESKTOP,
                         content=content,
                         refId=msg.get("refId"),
-                        meta={"sessionId": msg.get("sessionId")} if msg.get("sessionId") else None,
+                        meta=meta or None,
                     )
                     await queue.put({"type": "ack", "messageId": message.id})
                 elif t == "mode_switch":
@@ -146,7 +159,34 @@ def make_desktop_handler(hub: DesktopHub, input_bus: InputBus, mode_switch_fn=No
                     if result and result.get("error"):
                         await queue.put({"type": "error", "message": str(result["error"])})
                     else:
-                        await queue.put({"type": "mode_switched", "mode": mode})
+                        # T-17 🟠3：透传 companion 完整 ModeConfig（theme/hudVisible/thinkVisible/proactiveCare），
+                        # 前端 HUD 依赖这些字段（shared-types mode_switched 必填）
+                        await queue.put({
+                            "type": "mode_switched",
+                            "mode": mode,
+                            "theme": (result or {}).get("theme", {}),
+                            "hudVisible": bool((result or {}).get("hudVisible", False)),
+                            "thinkVisible": bool((result or {}).get("thinkVisible", False)),
+                            "proactiveCare": bool((result or {}).get("proactiveCare", False)),
+                        })
+                elif t in ("approval_response", "daily_unlock", "trigger_proactive"):
+                    # T-17 🟠5：旧协议消息显式处理——转发 companion 活跃生成连接（原协议支持）
+                    if control_fn is None:
+                        await queue.put({"type": "error", "message": f"{t} not supported"})
+                        continue
+                    ok = await asyncio.to_thread(control_fn, msg)
+                    if not ok:
+                        await queue.put({"type": "error", "message": "无进行中的生成，无法处理"})
+                elif t == "voice_toggle":
+                    # T-17 🟠5：voice_toggle 本地降级——设置 bus 生成桥 TTS 开关（后续生成生效）
+                    if voice_toggle_fn is not None:
+                        await asyncio.to_thread(voice_toggle_fn, bool(msg.get("enabled", False)))
+                    await queue.put({"type": "voice_toggled", "enabled": bool(msg.get("enabled", False))})
+                elif t == "cancel":
+                    # T-13：终止当前会话/消息的生成中（桌宠停止按钮）
+                    if cancel_fn is not None:
+                        await asyncio.to_thread(cancel_fn)
+                    # 无活跃生成 / 未配置 → 静默忽略（companion 语义对齐）
                 elif t == "voice_input":
                     pass  # 占位：语音输入本期不实现（C-3 后置）
                 # 未知类型静默忽略（保持现状）
@@ -164,6 +204,9 @@ async def serve_desktop_ws(
     input_bus: InputBus,
     hub: DesktopHub | None = None,
     mode_switch_fn=None,
+    cancel_fn=None,
+    control_fn=None,
+    voice_toggle_fn=None,
     host: str = "0.0.0.0",
     port: int = 8767,
 ):
@@ -171,7 +214,11 @@ async def serve_desktop_ws(
     hub = hub or DesktopHub(tracker)
     hub.set_loop(asyncio.get_running_loop())
     async with websockets.serve(
-        make_desktop_handler(hub, input_bus, mode_switch_fn=mode_switch_fn),
+        make_desktop_handler(
+            hub, input_bus,
+            mode_switch_fn=mode_switch_fn, cancel_fn=cancel_fn,
+            control_fn=control_fn, voice_toggle_fn=voice_toggle_fn,
+        ),
         host=host,
         port=port,
         max_size=4 * 1024 * 1024,
@@ -179,16 +226,30 @@ async def serve_desktop_ws(
         await asyncio.Future()  # 永久运行
 
 
-def start_desktop_ws_thread(tracker, input_bus, mode_switch_fn=None, host="0.0.0.0", port=8767, hub=None):
-    """启动桌宠 WS 服务（bus 进程内 asyncio 任务）。
+def start_desktop_ws_thread(
+    tracker,
+    input_bus,
+    mode_switch_fn=None,
+    cancel_fn=None,
+    control_fn=None,
+    voice_toggle_fn=None,
+    host="0.0.0.0",
+    port=8767,
+    hub=None,
+):
+    """在独立线程里跑 WS 服务（bus 进程组装用）。
 
-    hub 必须与投递侧（DesktopAdapter）共享同一实例——否则 adapter 看不到连接。
+    hub 必须与投递侧（DesktopAdapter）共享同一实例——否则 adapter 看不到连接（T-11）。
     """
-    """在独立线程里跑 WS 服务（bus 进程组装用）。"""
     import threading
 
     t = threading.Thread(
-        target=lambda: asyncio.run(serve_desktop_ws(tracker, input_bus, hub=hub, mode_switch_fn=mode_switch_fn, host=host, port=port)),
+        target=lambda: asyncio.run(serve_desktop_ws(
+            tracker, input_bus, hub=hub,
+            mode_switch_fn=mode_switch_fn, cancel_fn=cancel_fn,
+            control_fn=control_fn, voice_toggle_fn=voice_toggle_fn,
+            host=host, port=port,
+        )),
         name="bus-ws",
         daemon=True,
     )

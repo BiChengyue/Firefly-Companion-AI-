@@ -1,7 +1,8 @@
 /** 后端 HTTP API 封装 */
 import type { AppMode, ModeConfig, HealthResponse, SessionInfo, MemoryItem, MemoryType } from '@shared/index'
 
-const DEFAULT_HTTP_BASE = 'http://127.0.0.1:8765'
+// T-18 🟠6：默认指向 Tailnet companion（与 WS 总线地址对齐），生产打包不再打本地
+const DEFAULT_HTTP_BASE = 'http://100.111.201.71:8765'
 
 function getBaseHttp(): string {
   try {

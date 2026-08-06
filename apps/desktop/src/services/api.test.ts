@@ -44,12 +44,12 @@ describe('getApiBase — base URL 解析', () => {
 
   it('Tauri 打包（tauri.localhost 主机名）无配置时回退默认地址', () => {
     stubWindowLocation('http:', 'tauri.localhost')
-    expect(getApiBase()).toBe('http://127.0.0.1:8765')
+    expect(getApiBase()).toBe('http://100.111.201.71:8765')
   })
 
   it('Tauri 打包但 localStorage 无 firefly_http_base 时回退默认地址', () => {
     stubWindowLocation('tauri:', 'localhost')
-    expect(getApiBase()).toBe('http://127.0.0.1:8765')
+    expect(getApiBase()).toBe('http://100.111.201.71:8765')
   })
 })
 
@@ -60,6 +60,6 @@ describe('photoUrl — 静态资源 URL 拼接', () => {
 
   it('Tauri 打包下拼接后端地址', () => {
     stubWindowLocation('tauri:', 'localhost')
-    expect(photoUrl('work.png')).toBe('http://127.0.0.1:8765/photo/work.png')
+    expect(photoUrl('work.png')).toBe('http://100.111.201.71:8765/photo/work.png')
   })
 })

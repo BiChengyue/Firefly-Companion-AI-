@@ -56,8 +56,8 @@ class Dispatcher:
         inbound = self.store.get_inbound(message_id)
         if inbound is None:
             raise KeyError(f"inbox message not found: {message_id}")
-        if inbound["status"] == "processed":
-            return []  # 送达即止：不重复投递
+        if inbound["status"] in ("processed", "cancelled"):
+            return []  # 已送达 / 用户取消：不再投递（T-13 防御）
         sequence = inbound["sequence"]
         if sequence.policy == DeliveryPolicy.FIRST_REACHABLE and reachability is not None:
             sequence = DeliverySequence(

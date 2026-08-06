@@ -9,17 +9,32 @@ export type WsStatus = 'connecting' | 'open' | 'closed' | 'error'
  *  Tailnet 部署时经 localStorage `firefly_server_url` 覆盖（settings.ts）。 */
 export const DEFAULT_BUS_WS_URL = 'ws://100.111.201.71:8767/ws/desktop'
 
-/** 解析总线地址：优先 localStorage `firefly_server_url`（设置 UI 写入），缺省回退默认值 */
+/** 解析总线地址：优先 localStorage `firefly_server_url`（设置 UI 写入），缺省回退默认值；
+ *  有 `firefly_bus_ws_token` 时追加 `?token=`（T-18 🟠4，服务端 BUS_WS_TOKEN 恒定时间比较）。 */
 export function resolveBusWsUrl(): string {
+  let base = DEFAULT_BUS_WS_URL
   try {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem('firefly_server_url')
-      if (saved) return saved
+      if (saved) base = saved
     }
   } catch {
     // localStorage 不可用（SSR/隐私模式）→ 用默认值
   }
-  return DEFAULT_BUS_WS_URL
+
+  let token = ''
+  try {
+    if (typeof localStorage !== 'undefined') {
+      token = localStorage.getItem('firefly_bus_ws_token') ?? ''
+    }
+  } catch {
+    // 同上
+  }
+  if (token) {
+    const sep = base.includes('?') ? '&' : '?'
+    base = `${base}${sep}token=${encodeURIComponent(token)}`
+  }
+  return base
 }
 
 /**

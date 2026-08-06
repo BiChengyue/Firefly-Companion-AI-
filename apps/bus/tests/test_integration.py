@@ -50,9 +50,15 @@ class RecordingBridge:
         self.reply = reply
         self.calls = []
 
-    def generate_sync(self, content, session_id, channel=None):
+    def generate_sync(self, content, session_id, channel=None, workspace_path=None):
         self.calls.append({"content": content, "session_id": session_id, "channel": channel})
         return self.reply
+
+    def consume_cancelled(self):
+        return False  # T-13：集成测试不模拟取消
+
+    def cancel_sync(self):
+        return False
 
 
 class RecordingAdapter:
@@ -118,3 +124,60 @@ def test_end_to_end_qq_user_message(tmp_path):
     assert adapter.calls == [(DeliveryChannel.QQ, "在的，星")]
     assert bridge.calls[0]["channel"] == "qq"
     assert bridge.calls[0]["session_id"] == "qq-openid-1"
+
+
+def test_adapter_and_server_share_same_hub(tmp_path):
+    """T-11 回归：DesktopAdapter 与 WS serve 共享同一 hub 实例（main.py 组装方式）→
+    桌宠连接后 deliver 返回 True 不 skip（问题 1：双实例导致永远 offline）。"""
+    import asyncio
+    import json
+    import socket
+    import threading
+
+    import websockets
+
+    from bus.adapters import DesktopAdapter
+    from bus.models import DeliveryChannel, OutboundMessage
+    from bus.ws_server import DesktopHub, serve_desktop_ws
+
+    # 模拟 main.py：显式创建 hub（给 adapter），WS serve 透传同一 hub
+    tracker = ReachabilityTracker()
+    hub = DesktopHub(tracker)
+    store = BusStore(str(tmp_path / "bus.db"))
+    input_bus = InputBus(store)
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    started = threading.Event()
+
+    def run():
+        asyncio.run(serve_desktop_ws(tracker, input_bus, hub=hub, host="127.0.0.1", port=port))
+
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    # 等端口就绪
+    for _ in range(50):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                break
+        except OSError:
+            import time as _t
+
+            _t.sleep(0.1)
+
+    async def connect_and_deliver():
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws/desktop", max_size=4 * 1024 * 1024) as ws:
+            await ws.send(json.dumps({"type": "heartbeat"}))
+            await asyncio.sleep(0.3)
+            assert hub.online() is True
+            # 连接存活期间：adapter 与 serve 共享同一 hub → deliver 不 skip
+            adapter = DesktopAdapter(hub)
+            return adapter.deliver(
+                DeliveryChannel.DESKTOP,
+                OutboundMessage(id="m-t11", target=DeliveryChannel.DESKTOP, content="测试消息"),
+            )
+
+    assert asyncio.run(connect_and_deliver()) is True  # 不 offline skip
+    hub.close_all()

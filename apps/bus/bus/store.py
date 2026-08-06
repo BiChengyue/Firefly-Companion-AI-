@@ -111,10 +111,16 @@ class BusStore:
     # ── inbox ──
 
     def enqueue_inbound(self, message: InboundMessage, sequence: DeliverySequence) -> None:
+        """入队（T-11：INSERT OR IGNORE 幂等）。
+
+        同 id 已存在时忽略——保护已 processed/dead 的消息不被重复拉取重置回
+        pending 反复处理（事件桥 consumed 401 场景的兜底；hub_event 用确定性
+        message id，同一事件重复入队不覆盖原状态）。
+        """
         conn = _get_conn(self._db_path)
         with _write_lock:
             conn.execute(
-                """INSERT OR REPLACE INTO inbox
+                """INSERT OR IGNORE INTO inbox
                    (id, source, kind, content, ref_id, meta_json, sequence_json, policy, status, attempts, created_at)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (

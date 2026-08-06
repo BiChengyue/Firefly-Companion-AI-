@@ -134,7 +134,7 @@ def test_no_events_noop(tmp_path):
 
 
 def test_same_event_repoll_is_idempotent(tmp_path):
-    """AI-5 审查项：同一 hub 事件重复拉取 → 确定性 message id 覆盖，不重复生成（入队幂等）。"""
+    """AI-5 审查项：同一 hub 事件重复拉取 → 确定性 message id，入队忽略重复（不新增、不重置）。"""
     ev = _ev(1, "low_battery", {"battery": 10})
     srv, port = _start_fake_hub([ev])
     store = BusStore(str(tmp_path / "bus.db"))
@@ -143,9 +143,107 @@ def test_same_event_repoll_is_idempotent(tmp_path):
     assert len(store.list_inbound()) == 1
     first_id = store.list_inbound()[0]["id"]
     assert first_id == "hub-1"  # 确定性 ID
-    # 事件未被 consumed（模拟桥崩溃重启），再次拉取 → 覆盖同一条，不新增
+    # 事件未被 consumed（模拟桥崩溃重启），再次拉取 → 忽略同一条，不新增
     assert bridge.poll_once() == 1
     rows = store.list_inbound()
     assert len(rows) == 1
     assert rows[0]["id"] == first_id
     srv.shutdown()
+
+
+def test_processed_event_repoll_does_not_requeue(tmp_path):
+    """T-11 根治回归：事件入 inbox 且已 processed 后，即使 consumed 失败再次拉取
+    同一事件——不再重置回 pending（不反复处理）。"""
+    ev = _ev(1, "low_battery", {"battery": 10})
+    srv, port = _start_fake_hub([ev])
+    store = BusStore(str(tmp_path / "bus.db"))
+    bridge = EventBridge(InputBus(store), hub_url=f"http://127.0.0.1:{port}", token="t")
+    assert bridge.poll_once() == 1
+    mid = store.list_inbound()[0]["id"]
+    store.mark_inbound(mid, "processed")  # 模拟已处理完成
+    # consumed 未成功（事件仍在 hub），再次轮询
+    assert bridge.poll_once() == 1
+    row = store.get_inbound(mid)
+    assert row["status"] == "processed"  # 不被重置 → 不反复处理
+    assert len(store.list_inbound()) == 1
+    srv.shutdown()
+
+
+def test_consumed_uses_phone_token_header(tmp_path):
+    """T-11 根治：consumed 端点用 X-Phone-Token 头鉴权（hub api_server.py:266），
+    事件桥必须带 PCH_PHONE_TOKEN —— 与 GET events 的 X-PCH-Token 是两个不同的头。"""
+    class TokenCheckHub(FakeHubHandler):
+        """校验 X-Phone-Token 的假 hub（模拟真 hub consumed 端点）：token 错 → 401 不记录。"""
+
+        required_phone = "right-phone-token"
+
+        def do_POST(self):
+            if self.headers.get("X-Phone-Token") != self.required_phone:
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b'{"error":"bad phone token"}')
+                return
+            super().do_POST()
+
+    TokenCheckHub.events = [_ev(1, "low_battery", {"battery": 5})]
+    TokenCheckHub.consumed = []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), TokenCheckHub)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    store = BusStore(str(tmp_path / "bus.db"))
+    # 带正确 X-Phone-Token → consumed 成功
+    bridge = EventBridge(
+        InputBus(store),
+        hub_url=f"http://127.0.0.1:{srv.server_address[1]}",
+        token="pch-tok",
+        phone_token="right-phone-token",
+    )
+    assert bridge.poll_once() == 1
+    assert TokenCheckHub.consumed == [1]
+    srv.shutdown()
+
+
+def test_consumed_missing_phone_token_401(tmp_path):
+    """consumed 缺 X-Phone-Token（PCH_PHONE_TOKEN 未配置）→ 401，消费标记失败不静默。"""
+    class TokenCheckHub(FakeHubHandler):
+        required_phone = "right-phone-token"
+
+        def do_POST(self):
+            if self.headers.get("X-Phone-Token") != self.required_phone:
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b'{"error":"bad phone token"}')
+                return
+            super().do_POST()
+
+    TokenCheckHub.events = [_ev(1, "low_battery", {"battery": 5})]
+    TokenCheckHub.consumed = []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), TokenCheckHub)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    store = BusStore(str(tmp_path / "bus.db"))
+    # phone_token 为空（部署未注入 PCH_PHONE_TOKEN 的场景）→ consumed 401
+    bridge = EventBridge(
+        InputBus(store),
+        hub_url=f"http://127.0.0.1:{srv.server_address[1]}",
+        token="pch-tok",
+        phone_token="",
+    )
+    assert bridge.poll_once() == 1  # 事件仍入 inbox（GET 成功）
+    assert TokenCheckHub.consumed == []  # consumed 401 未记录
+    # 幂等兜底：OR IGNORE 不重置，事件不会因重复拉取反复处理
+    assert len(store.list_inbound()) == 1
+    srv.shutdown()
+
+
+def test_resolve_pch_token_env_and_file(tmp_path, monkeypatch):
+    """T-11：token 来源与 hub-api 一致（env 优先，令牌文件兜底）。"""
+    from bus.event_bridge import resolve_pch_token
+
+    monkeypatch.setenv("PCH_TOKEN", "env-tok")
+    assert resolve_pch_token() == "env-tok"
+    monkeypatch.delenv("PCH_TOKEN", raising=False)
+    token_file = tmp_path / "pch.token"
+    token_file.write_text("file-tok\n", encoding="utf-8")
+    monkeypatch.setenv("PCH_TOKEN_FILE", str(token_file))
+    assert resolve_pch_token() == "file-tok"
+    monkeypatch.delenv("PCH_TOKEN_FILE", raising=False)
+    assert resolve_pch_token() == ""  # 无 env 无文件 → 空（本地测试环境）

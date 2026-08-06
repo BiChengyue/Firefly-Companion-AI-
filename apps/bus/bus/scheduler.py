@@ -29,6 +29,47 @@ POLL_SECONDS = 1.0
 MAX_ATTEMPTS = 3              # 处理失败重试上限（超限死信）
 MAX_AGE_SECONDS = 2 * 3600    # 消息超 2h 未处理 → 死信（沿用 MAX_EVENT_AGE 语义）
 
+DEAD_LETTER_MESSAGE = "回复生成失败，请重试"
+
+# critical 事件 kind（CONTRACTS §3：绕过 QQ 限频；旧 event_worker CRITICAL_KINDS 升级）
+# low_battery_critical（低电量 10% 二级档，T-09/R5）与 low_battery 均为紧急提醒
+CRITICAL_KINDS = {"low_battery", "low_battery_critical"}
+
+
+def is_critical_kind(kind: str | None, meta: dict | None = None) -> bool:
+    """critical 判定（T-23 🔴4 批次级）：合并消息自身的 kind 或其 meta["events"] 任一
+    成员的 kind 为 critical → 整批 critical（低电量混批不被普通事件稀释，QQ 限频期仍送达）。"""
+    if kind and kind in CRITICAL_KINDS:
+        return True
+    if meta:
+        for ev in meta.get("events") or []:
+            if str(ev.get("kind", "")) in CRITICAL_KINDS:
+                return True
+    return False
+
+
+class DeadLetterNotifier:
+    """死信通知（T-14）：生成失败最终死信时，把 error 回给来源端。
+
+    - 来源 desktop → hub.push({"type":"error",...})（桌宠前端据此复位 streaming）
+    - 来源 qq → qq adapter 发文字（未配置 adapter 则跳过）
+    - 来源 hub_event → 无来源端，不回
+    """
+
+    def __init__(self, hub=None, qq_adapter=None):
+        self.hub = hub
+        self.qq_adapter = qq_adapter
+
+    def notify(self, inbound: dict) -> None:
+        source = inbound.get("source")
+        if source == "desktop" and self.hub is not None:
+            self.hub.push({"type": "error", "message": DEAD_LETTER_MESSAGE})
+        elif source == "qq" and self.qq_adapter is not None:
+            self.qq_adapter.deliver(
+                DeliveryChannel.QQ,
+                OutboundMessage(id=f"err-{str(inbound.get('id', ''))[:8]}", target=DeliveryChannel.QQ, content=DEAD_LETTER_MESSAGE),
+            )
+
 
 def hub_event_prompt(meta: dict) -> str:
     """把 hub_event 的 events 明细格式化为给 companion 的自然语言提示。"""
@@ -49,6 +90,7 @@ class Scheduler:
         max_attempts: int = MAX_ATTEMPTS,
         max_age_seconds: int = MAX_AGE_SECONDS,
         poll_seconds: float = POLL_SECONDS,
+        notifier: DeadLetterNotifier | None = None,
     ):
         self.store = store
         self.bridge = bridge
@@ -57,6 +99,7 @@ class Scheduler:
         self.max_attempts = max_attempts
         self.max_age_seconds = max_age_seconds
         self.poll_seconds = poll_seconds
+        self.notifier = notifier
 
     def tick_once(self) -> int:
         """跑一轮：崩溃恢复 + 死信清理 + 消费生成派发。返回处理的消息数。"""
@@ -74,11 +117,13 @@ class Scheduler:
             age = now - (m["createdAt"] / 1000)
             if m["attempts"] >= self.max_attempts or age > self.max_age_seconds:
                 self.store.mark_inbound(m["id"], "dead")
+                self._notify_dead(m)
             else:
                 self.store.mark_inbound(m["id"], "pending")  # 重试（不消耗 attempts）
         for m in self.store.list_inbound(status="pending"):
             if now - (m["createdAt"] / 1000) > self.max_age_seconds:
                 self.store.mark_inbound(m["id"], "dead")
+                self._notify_dead(m)
         # 3) 消费 pending（CAS 领取；failed 由第 2 步决定是否重置，这里只处理 pending）
         handled = 0
         for m in self.store.list_inbound(status="pending", limit=10):
@@ -91,6 +136,15 @@ class Scheduler:
                 self.store.cas_inbound(m["id"], "processing", "failed", count_attempts=False)
             handled += 1  # 成功/失败均视为已处理（失败由死信/重试机制接管）
         return handled
+
+    def _notify_dead(self, inbound: dict) -> None:
+        """死信时通知来源端（T-14）。"""
+        if self.notifier is None:
+            return
+        try:
+            self.notifier.notify(inbound)
+        except Exception as e:
+            _log.warning("dead letter notify failed: %s", e)
 
     def _process(self, inbound: dict) -> None:
         """单条：生成 → 写 outbox → 派发。"""
@@ -109,9 +163,32 @@ class Scheduler:
 
         channel = "qq" if first_target == DeliveryChannel.QQ else None
         session_id = resolve_session_id(source, inbound["meta"])
-        reply = self.bridge.generate_sync(prompt, session_id, channel)
+        workspace_path = (inbound.get("meta") or {}).get("workspacePath")  # T-17 🟠5 透传
 
-        OutputBus(self.store).emit(OutboundMessage(id=message_id, target=first_target, content=reply))
+        # T-23 🔴3：生成异常时无条件消费 cancel 标志（防残留误标下一消息）；
+        # 标志为 True（生成中已被用户取消）→ 标 cancelled 不重生成、不死信重试
+        try:
+            reply = self.bridge.generate_sync(prompt, session_id, channel, workspace_path=workspace_path)
+        except Exception as e:
+            _log.warning("message %s generate failed: %s", message_id, e)
+            cancelled = self.bridge.consume_cancelled()
+            if cancelled:
+                self.store.mark_inbound(message_id, "cancelled")
+                _log.info("message %s cancelled by user (generate aborted), skip retry", message_id)
+                return  # 不抛出：不进 failed 重试（已取消的消息不得重生成）
+            raise  # 非取消异常：交由上层标 failed 重试
+
+        # T-13：生成正常返回但被用户取消（桌宠停止按钮）→ 标记 cancelled，不投递半成品
+        if self.bridge.consume_cancelled():
+            self.store.mark_inbound(message_id, "cancelled")
+            _log.info("message %s cancelled by user, skip delivery", message_id)
+            return
+
+        # T-17 🟠2 / T-23 🔴4：critical 批次级（合并 meta 任一成员 critical → 整批 critical）
+        critical = is_critical_kind(inbound.get("kind"), inbound.get("meta"))
+        OutputBus(self.store).emit(OutboundMessage(
+            id=message_id, target=first_target, content=reply, critical=critical,
+        ))
         acks = self.dispatcher.dispatch(message_id, reachability=self.tracker.current())
         _log.info(
             "delivered %s -> %s (source=%s, acks=%d)",
