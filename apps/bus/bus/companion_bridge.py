@@ -66,6 +66,12 @@ class CompanionBridge:
         self._active_ws = None            # 当前活跃生成的连接（单槽：调度线程逐条处理）
         self._active_loop = None          # 活跃连接所属事件循环
         self._cancelled = False           # 最近一次生成是否被 cancel
+        self._last_mode: str | None = None  # 最近一次生成模式（done.message.mode）——work 禁分条（2026-08-07）
+
+    @property
+    def last_mode(self) -> str | None:
+        """最近一次生成返回的模式（daily/work）。work 模式禁止分条。"""
+        return self._last_mode
 
     async def generate(
         self,
@@ -100,7 +106,10 @@ class CompanionBridge:
                         if delta:
                             parts.append(delta)
                     elif t == "done":
-                        full = (msg.get("message") or {}).get("content") or ""
+                        msg_data = msg.get("message") or {}
+                        full = msg_data.get("content") or ""
+                        # 记录生成模式（daily/work）——work 模式禁止分条（2026-08-07）
+                        self._last_mode = msg_data.get("mode") or None
                         if full:
                             return full
                         return "".join(parts) or "（没有回复）"

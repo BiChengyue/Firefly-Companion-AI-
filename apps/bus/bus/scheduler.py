@@ -186,8 +186,12 @@ class Scheduler:
 
         # T-17 🟠2 / T-23 🔴4：critical 批次级（合并 meta 任一成员 critical → 整批 critical）
         critical = is_critical_kind(inbound.get("kind"), inbound.get("meta"))
+        # work 模式禁止分条（2026-08-07 用户要求）：把生成模式透传给输出总线
+        # getattr 防御：测试桩等旧接口可能无 last_mode
+        gen_mode = getattr(self.bridge, "last_mode", None)
         OutputBus(self.store).emit(OutboundMessage(
             id=message_id, target=first_target, content=reply, critical=critical,
+            mode=gen_mode,
         ))
         acks = self.dispatcher.dispatch(message_id, reachability=self.tracker.current())
         _log.info(

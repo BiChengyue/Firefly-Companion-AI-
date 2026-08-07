@@ -112,6 +112,7 @@ class OutboundMessage(BaseModel):
     voice: OutboundVoice | None = None
     critical: bool = False  # 低电量等，绕过 QQ 限频（§3）
     refId: str | None = None
+    mode: str | None = None  # companion 生成时的模式（daily/work）——work 模式禁止分条（2026-08-07）
     action: DeviceAction | None = None
 
 

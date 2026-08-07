@@ -13,6 +13,7 @@
 由各端通道（qq / desktop / mobile）实现；骨架期注入桩实现测试。
 """
 import logging
+import re
 from typing import Protocol
 
 from bus.models import (
@@ -33,6 +34,43 @@ class ChannelAdapter(Protocol):
     """把一条出站消息投递到指定通道。返回 True = 送达。"""
 
     def deliver(self, channel: DeliveryChannel, message: OutboundMessage) -> bool: ...
+
+
+def split_reply_chunks(text: str, max_chunks: int = 4) -> list[str]:
+    """整段回复拆条（2026-08-07 用户需求：消息分条，不要一大包）。
+
+    优先级（用户指示：LLM 先行拆分，用回车隔开，输出总线按条发送）：
+    1. 回复里已有换行分条（LLM 生成时按规则用空行/换行分隔）→ 按换行拆。
+    2. 无换行 → 按句末标点启发式拆（fallback），累积 ~20 字成条。
+    最多 max_chunks 条；超出的剩余合并到末条（不丢内容）；短内容原样返回。
+    """
+    t = (text or "").strip()
+    if not t:
+        return [text or ""]
+
+    # 1) 换行优先（LLM 已按规则用换行分条）
+    lines = [ln.strip() for ln in re.split(r"\n+", t) if ln.strip()]
+    if len(lines) >= 2:
+        chunks = lines
+    else:
+        # 2) fallback：按句末标点断句，累积 ~20 字成条
+        sentences = [s.strip() for s in re.split(r"(?<=[。！？!?~])", t) if s.strip()]
+        if len(sentences) <= 1:
+            return [t]
+        chunks = []
+        cur = ""
+        for s in sentences:
+            if cur and len(cur) + len(s) > 20 and len(chunks) < max_chunks - 1:
+                chunks.append(cur)
+                cur = s
+            else:
+                cur += s
+        if cur:
+            chunks.append(cur)
+
+    if len(chunks) > max_chunks:
+        chunks = chunks[: max_chunks - 1] + ["\n".join(chunks[max_chunks - 1 :])]
+    return chunks
 
 
 class Dispatcher:
@@ -71,11 +109,28 @@ class Dispatcher:
         for target in sequence.targets:
             outbound = self._outbound_for(message_id, target)
             attempts = self._attempts(message_id)
-            try:
-                ok = self.adapter.deliver(target, outbound)
-            except Exception as e:  # 通道异常视为投递失败（不抛出，避免整条标 failed 白耗重生成）
-                _log.warning("deliver %s -> %s raised: %s", message_id, target.value, e)
-                ok = False
+            # 拆条发送（2026-08-07 用户需求：消息分条，不要一大包——桌宠/QQ 都受益）
+            # 不分条：带 action（说做分离指令，必须整条一次执行）/ work 模式（萨姆专业语气）
+            if outbound.action or outbound.mode == "work":
+                chunks = [outbound.content]
+            else:
+                chunks = split_reply_chunks(outbound.content)
+            ok = True
+            for chunk in chunks:
+                chunk_ob = OutboundMessage(
+                    id=outbound.id,
+                    target=target,
+                    content=chunk,
+                    critical=outbound.critical,
+                    action=outbound.action,
+                )
+                try:
+                    ok = self.adapter.deliver(target, chunk_ob)
+                except Exception as e:  # 通道异常视为投递失败（不抛出，避免整条标 failed 白耗重生成）
+                    _log.warning("deliver %s -> %s raised: %s", message_id, target.value, e)
+                    ok = False
+                if not ok:
+                    break  # 当前条失败 → 该消息视为投递失败（不再发后续条）
             status = "delivered" if ok else "failed"
             acks.append(DeliveryAck(messageId=message_id, channel=target, status=status))
             self.store.mark_outbound(message_id, status, attempts + 1)
