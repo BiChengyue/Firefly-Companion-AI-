@@ -204,9 +204,26 @@ async def serve_voice_file(filename: str):
                 return fp
         return None
 
-    # 如果文件已存在，立即返回
+    async def _wait_file_stable(fp: Path) -> None:
+        """等文件大小稳定（GPT-SoVITS 写入中 exists=True 但数据未写完——
+        立即返回会导致 206 截断/播放失败/开头缺字，2026-08-07 修复）。"""
+        last_size = -1
+        stable = 0
+        for _ in range(20):  # 最多等 ~3 秒（大小连续 3 次不变视为写完）
+            cur = fp.stat().st_size
+            if cur > 0 and cur == last_size:
+                stable += 1
+                if stable >= 3:
+                    break
+            else:
+                stable = 0
+            last_size = cur
+            await asyncio.sleep(0.15)
+
+    # 如果文件已存在，立即返回（等大小稳定——写入中 exists=True 但数据未写完）
     actual_file = find_actual_file()
     if actual_file:
+        await _wait_file_stable(actual_file)
         media_type = "audio/wav" if actual_file.suffix == ".wav" else "audio/mpeg"
         return FileResponse(actual_file, media_type=media_type)
 
@@ -215,6 +232,7 @@ async def serve_voice_file(filename: str):
         await asyncio.sleep(0.1)
         actual_file = find_actual_file()
         if actual_file:
+            await _wait_file_stable(actual_file)
             media_type = "audio/wav" if actual_file.suffix == ".wav" else "audio/mpeg"
             return FileResponse(actual_file, media_type=media_type)
 
