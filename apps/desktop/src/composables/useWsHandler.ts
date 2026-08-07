@@ -3,6 +3,7 @@
  * 总线协议（PROTOCOL.md v1）：bus 回 `ack`（入 inbox 确认）、`device_command`（说做分离动作）。
  * 减少 App.vue 体积（612 → ~500 行），提升可维护性。
  */
+import { onUnmounted } from 'vue'
 import { useCompanionStore } from '@/stores/companion'
 import { wsClient } from '@/services/ws'
 import { useReminderScheduler } from '@/composables/useReminderScheduler'
@@ -34,6 +35,13 @@ function handleDeviceCommand(command: WsDeviceCommand) {
 
 export function useWsHandler(callbacks: WsHandlerCallbacks) {
   const companion = useCompanionStore()
+  const cleanupFns: Array<() => void> = []
+
+  // HMR/重挂载时清理已注册的 WS 处理器（2026-08-07 修复：onMessage/onStatus 的
+  // 清理函数此前未保存，App.vue 热更新后 handler 叠加 → 同一条消息被处理多次 → 消息重复显示）
+  onUnmounted(() => {
+    cleanupFns.forEach((fn) => fn())
+  })
 
   function handleWsMessage(msg: WsServerMessage) {
     switch (msg.type) {
@@ -177,17 +185,19 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
   function connect() {
     wsClient.connect()
 
-    wsClient.onStatus((status) => {
-      companion.setWsConnected(status === 'open')
-      // T-15：WS 断开/出错时若仍处于生成中 → 强制复位 + Toast，避免按钮卡死（重连后不卡）
-      if (status === 'closed' || status === 'error') {
-        if (companion.streaming || companion.isThinking || companion.agentRunning) {
-          companion.forceResetGeneration('连接已断开')
+    cleanupFns.push(
+      wsClient.onStatus((status) => {
+        companion.setWsConnected(status === 'open')
+        // T-15：WS 断开/出错时若仍处于生成中 → 强制复位 + Toast，避免按钮卡死（重连后不卡）
+        if (status === 'closed' || status === 'error') {
+          if (companion.streaming || companion.isThinking || companion.agentRunning) {
+            companion.forceResetGeneration('连接已断开')
+          }
         }
-      }
-    })
+      }),
+    )
 
-    wsClient.onMessage(handleWsMessage)
+    cleanupFns.push(wsClient.onMessage(handleWsMessage))
   }
 
   return { handleWsMessage, connect }
