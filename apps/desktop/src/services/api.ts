@@ -35,6 +35,64 @@ export function getApiBase(): string {
   return getBaseHttp()
 }
 
+// ── T-29-A3：服务器状态（bus 8766 只读监控接口）──
+/** bus 进程入站 HTTP 默认地址（Tailnet；BUS_PORT 默认 8766）。 */
+export const DEFAULT_BUS_HTTP_BASE = 'http://100.111.201.71:8766'
+
+/** bus 的 HTTP base：
+ *  - dev（Vite，非 Tauri）→ 空字符串走相对路径，由 vite.config.ts proxy 转发（/api/v1/monitor → 8766）
+ *  - 生产（Tauri webview）→ 从 localStorage `firefly_server_url`（ws://…:8767/ws/desktop）推导 http://…，或回退默认 */
+export function getBaseBusHttp(): string {
+  try {
+    if (typeof window === 'undefined') return DEFAULT_BUS_HTTP_BASE
+    const { protocol, hostname } = window.location
+    const isTauriBundle = protocol === 'tauri:' || hostname === 'tauri.localhost'
+    if (!isTauriBundle) return ''
+    const raw = localStorage.getItem('firefly_server_url')
+    if (raw) {
+      return raw.replace(/^ws:\/\//, 'http://').replace(/\/ws\/desktop.*$/, '')
+    }
+    return DEFAULT_BUS_HTTP_BASE
+  } catch {
+    return DEFAULT_BUS_HTTP_BASE
+  }
+}
+
+export interface ServerMonitor {
+  ts: number
+  resource: {
+    cpu: number
+    mem: number
+    disk: { C?: number }
+    temp?: number | null
+  }
+  services: Array<{
+    name: string
+    status: 'running' | 'stopped' | string
+    ports: Record<string, boolean>
+  }>
+  network: { tailscale: boolean; deepseek_api: boolean; qq_gateway: boolean }
+  log_errors?: Record<string, number>
+  alerts?: Array<unknown>
+}
+
+/** 拉取服务器状态快照（bus /api/v1/monitor，只读）。失败抛错（调用方降级显示「监控暂不可用」）。
+ *  带 X-Bus-Token（与 WS 共用 localStorage `firefly_bus_ws_token`，服务器配置 BUS_TOKEN 时必需）。 */
+export async function getServerMonitor(signal?: AbortSignal): Promise<ServerMonitor> {
+  let token = ''
+  try {
+    if (typeof localStorage !== 'undefined') token = localStorage.getItem('firefly_bus_ws_token') ?? ''
+  } catch {
+    // localStorage 不可用 → 不带 token
+  }
+  const res = await fetch(`${getBaseBusHttp()}/api/v1/monitor`, {
+    headers: token ? { 'X-Bus-Token': token } : {},
+    signal,
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 /**
  * 头像等后端静态图片的完整 URL。
  * dev（Vite）下 base 为空 → 返回相对路径，由 Vite public 静态服务提供；

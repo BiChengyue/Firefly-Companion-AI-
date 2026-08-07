@@ -118,3 +118,61 @@ def test_no_token_loopback_only(server, monkeypatch):
     monkeypatch.setenv("BUS_TOKEN", "t")
     assert _auth_ok(FakeHandler("100.111.201.71", {"X-Bus-Token": "t"})) is True
     assert _auth_ok(FakeHandler("100.111.201.71", {})) is False
+
+
+# ── T-29-A3：GET /api/v1/monitor（服务器状态快照，只读）──
+
+def test_monitor_ok(server, tmp_path, monkeypatch):
+    """status.json 存在 → 200 透传内容（回环放行）。"""
+    srv, port, _ = server
+    import bus.api as api_mod
+
+    f = tmp_path / "status.json"
+    f.write_text(json.dumps({"ts": 1786000000000, "resource": {"cpu": 12.3, "mem": 62.5},
+                             "services": [{"name": "firefly-frpc", "status": "stopped", "ports": {}}],
+                             "network": {"tailscale": True}}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(api_mod, "_MONITOR_FILE", str(f))
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/monitor", timeout=5) as r:
+        assert r.status == 200
+        body = json.loads(r.read().decode())
+        assert body["resource"]["cpu"] == 12.3
+        assert body["services"][0]["status"] == "stopped"
+
+
+def test_monitor_missing_404(server, tmp_path, monkeypatch):
+    """status.json 缺失 → 404 + {"error": "monitor unavailable"}。"""
+    srv, port, _ = server
+    import bus.api as api_mod
+
+    monkeypatch.setattr(api_mod, "_MONITOR_FILE", str(tmp_path / "nope" / "status.json"))
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/monitor", timeout=5)
+    assert ei.value.code == 404
+    assert json.loads(ei.value.read().decode())["error"] == "monitor unavailable"
+
+
+def test_monitor_requires_token(server, tmp_path, monkeypatch):
+    """配置 BUS_TOKEN 后无 token → 401。"""
+    srv, port, _ = server
+    import bus.api as api_mod
+
+    monkeypatch.setattr(api_mod, "_bus_token", lambda: "sekrit")
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/monitor", timeout=5)
+    assert ei.value.code == 401
+
+
+def test_monitor_ok_with_token(server, tmp_path, monkeypatch):
+    """携带正确 X-Bus-Token → 200。"""
+    srv, port, _ = server
+    import bus.api as api_mod
+
+    f = tmp_path / "status.json"
+    f.write_text(json.dumps({"ts": 1}), encoding="utf-8")
+    monkeypatch.setattr(api_mod, "_MONITOR_FILE", str(f))
+    monkeypatch.setattr(api_mod, "_bus_token", lambda: "sekrit")
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1/monitor",
+                                 headers={"X-Bus-Token": "sekrit"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.status == 200
+        assert json.loads(r.read().decode())["ts"] == 1

@@ -26,6 +26,8 @@ _SOURCE_BY_PATH = {
     "/api/v1/inbound/mobile": MessageSource.MOBILE,
 }
 _MAX_BODY = 64 * 1024
+# T-29-A3：服务器状态快照文件（ServerMonitor 每 30s 写，透传返回；env 可覆盖供测试）
+_MONITOR_FILE = os.environ.get("MONITOR_STATUS_FILE", r"C:\ProgramData\firefly-bot\monitor\status.json")
 
 
 def _bus_token() -> str:
@@ -72,8 +74,28 @@ class BusHttpHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/v1/health":
             self._json(200, {"status": "ok", "service": "bus"})
+        elif parsed.path == "/api/v1/monitor":
+            self._serve_monitor()
         else:
             self._json(404, {"error": {"code": "NOT_FOUND", "message": "unknown endpoint"}})
+
+    def _serve_monitor(self):
+        """服务器状态快照（T-29-A3，只读）：透传 ServerMonitor 写的 status.json 原样返回。
+        鉴权与入站 API 一致（X-Bus-Token 或回环放行）；文件缺失 → 404。"""
+        if not _auth_ok(self):
+            self._json(401, {"error": {"code": "UNAUTHORIZED", "message": "missing or bad X-Bus-Token"}})
+            return
+        try:
+            with open(_MONITOR_FILE, "rb") as f:
+                raw = f.read()
+        except OSError:
+            self._json(404, {"error": "monitor unavailable"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def do_POST(self):
         parsed = urlparse(self.path)
