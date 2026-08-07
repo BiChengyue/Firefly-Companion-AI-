@@ -18,7 +18,10 @@ class ToolSchema:
 _agent_tools: dict[str, tuple[ToolSchema, Callable]] = {}
 
 # 日常模式下允许的只读工具（解禁/解锁时可用）
-_DAILY_ALLOWED_TOOLS: set[str] = {"web_search", "web_fetch", "deep_research", "get_datetime", "search_lore"}
+_DAILY_ALLOWED_TOOLS: set[str] = {
+    "web_search", "web_fetch", "deep_research", "get_datetime", "search_lore",
+    "server_status",  # T-29-A2：纯只读查询，日常模式可用
+}
 
 
 def register_agent_tool(
