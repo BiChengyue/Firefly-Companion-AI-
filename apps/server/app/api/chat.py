@@ -565,7 +565,11 @@ async def chat_ws(ws: WebSocket):
         return cleaned.strip()
 
     async def _send_tts(text: str):
-        """预连接优化：先推送音频 URL → 浏览器提前连接 → 再生成 TTS → 文件就绪即播。"""
+        """预连接优化：先推送音频 URL → 浏览器提前连接 → 再生成 TTS → 文件就绪即播。
+
+        2026-08-07 分条语音：完整回复拆成段落逐条合成（与文字分条对应），
+        每段独立语音——短文本合成快、停顿自然、不切段拼接缺字。
+        """
         try:
             from app.core.voice.tts import get_tts_service
             import hashlib
@@ -577,25 +581,33 @@ async def chat_ws(ws: WebSocket):
             if not clean:
                 return
             svc = get_tts_service()
-            
+
             live_settings = get_settings()
             provider = (live_settings.voice.tts.engine or "edge-tts").lower()
             voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
-            
-            # 提前算出缓存 key 和 URL（结合 provider, voice_id 与 clean 文本）
-            cache_key = hashlib.md5(f"{provider}_{voice_id}_{clean}".encode("utf-8")).hexdigest()
-            audio_url = f"http://127.0.0.1:8765/api/voice/file/{cache_key}.wav"
-            
-            # ① 先发 URL，浏览器立即发起 GET（此时文件尚不存在，端点轮询等待）
-            await _send_json(ws, {
-                "type": "voice_audio",
-                "audioUrl": audio_url,
-                "text": clean,
-            })
-            
-            # ② 再生成 TTS，写入缓存文件 → 浏览器的等待 GET 立即解除
-            await svc.generate_speech(clean, provider=provider, voice_id=voice_id)
-            logger.info("推送 TTS (%s/%s): %s...", provider, voice_id, clean[:20])
+
+            # 分条：与输出总线 split_reply_chunks 同规则（换行拆 + 最多 4 段，超长合并末段）
+            segs = [s.strip() for s in re.split(r"\n+", clean) if s.strip()]
+            if len(segs) > 4:
+                segs = segs[:3] + ["".join(segs[3:])]
+            if len(segs) <= 1:
+                segs = [clean]
+
+            for seg in segs:
+                # 提前算出缓存 key 和 URL（结合 provider, voice_id 与段文本）
+                cache_key = hashlib.md5(f"{provider}_{voice_id}_{seg}".encode("utf-8")).hexdigest()
+                audio_url = f"http://127.0.0.1:8765/api/voice/file/{cache_key}.wav"
+
+                # ① 先发 URL，浏览器立即发起 GET（此时文件尚不存在，端点轮询等待）
+                await _send_json(ws, {
+                    "type": "voice_audio",
+                    "audioUrl": audio_url,
+                    "text": seg,
+                })
+
+                # ② 再生成 TTS，写入缓存文件 → 浏览器的等待 GET 立即解除
+                await svc.generate_speech(seg, provider=provider, voice_id=voice_id)
+                logger.info("推送 TTS (%s/%s): %s...", provider, voice_id, seg[:20])
         except Exception as e:
             logger.error("TTS 生成失败: %s: %s", type(e).__name__, e)
 

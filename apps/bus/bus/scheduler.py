@@ -197,17 +197,17 @@ class Scheduler:
         # T-27：单轨后语音中转——companion 推的 voice_audio 经 bus 组装进 outbound，
         # DesktopAdapter 会再推 voice_audio 事件给桌宠（前端零改动）。
         # audioUrl 是 companion 本机视角（127.0.0.1:8765）——对外投递前换成 bus 可达的公网/Tailnet 地址。
-        voice = None
-        last_voice = getattr(self.bridge, "last_voice", None)
-        if last_voice and last_voice.get("audioUrl"):
-            public_ip = os.environ.get("BUS_PUBLIC_IP", "127.0.0.1")
-            audio_url = last_voice["audioUrl"]
+        # 2026-08-07 分条语音：companion 逐段合成推多条 voice_audio → voices 列表（与文字分条顺序一致）。
+        voices = []
+        for v in getattr(self.bridge, "last_voices", []) or []:
+            audio_url = v.get("audioUrl") or ""
             if "127.0.0.1" in audio_url:
-                audio_url = audio_url.replace("127.0.0.1", public_ip)
-            voice = OutboundVoice(audioUrl=audio_url, text=last_voice.get("text"))
+                audio_url = audio_url.replace("127.0.0.1", os.environ.get("BUS_PUBLIC_IP", "127.0.0.1"))
+            voices.append(OutboundVoice(audioUrl=audio_url, text=v.get("text")))
+        voice = voices[0] if voices else None
         OutputBus(self.store).emit(OutboundMessage(
             id=message_id, target=first_target, content=reply, critical=critical,
-            mode=gen_mode, voice=voice,
+            mode=gen_mode, voice=voice, voices=voices,
         ))
         acks = self.dispatcher.dispatch(message_id, reachability=self.tracker.current())
         _log.info(

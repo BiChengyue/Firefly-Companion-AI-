@@ -67,7 +67,8 @@ class CompanionBridge:
         self._active_loop = None          # 活跃连接所属事件循环
         self._cancelled = False           # 最近一次生成是否被 cancel
         self._last_mode: str | None = None  # 最近一次生成模式（done.message.mode）——work 禁分条（2026-08-07）
-        self._last_voice: dict | None = None  # 最近一次生成捕获的 voice_audio（T-27：单轨后语音中转）
+        self._last_voices: list[dict] = []  # 最近一次生成捕获的 voice_audio 列表（分条语音逐段，T-27）
+        self._last_voice: dict | None = None  # 兼容单条（last_voices 第一条）
 
     @property
     def last_mode(self) -> str | None:
@@ -76,8 +77,13 @@ class CompanionBridge:
 
     @property
     def last_voice(self) -> dict | None:
-        """最近一次生成捕获的语音（companion 推的 voice_audio：audioUrl/text），供输出总线组装。"""
-        return self._last_voice
+        """最近一次生成捕获的语音（兼容单条：last_voices 第一条）。"""
+        return self._last_voices[0] if self._last_voices else None
+
+    @property
+    def last_voices(self) -> list[dict]:
+        """最近一次生成捕获的 voice_audio 列表（分条语音逐段，顺序与文字分条一致）。"""
+        return self._last_voices
 
     async def generate(
         self,
@@ -100,6 +106,7 @@ class CompanionBridge:
                     chat_msg["workspacePath"] = workspace_path
                 await ws.send(json.dumps(chat_msg))
                 # 每次生成独立：清掉上次残留的 voice_audio（避免 done 判断被污染）
+                self._last_voices = []
                 self._last_voice = None
                 parts: list[str] = []
                 while True:
@@ -116,34 +123,32 @@ class CompanionBridge:
                     elif t == "voice_audio":
                         # T-27 语音中转：voice_audio 可能在 done 之前到达（_send_tts 的
                         # create_task 先于 done 启动，预连接 URL 先发）——任何位置都捕获。
-                        self._last_voice = {
+                        self._last_voices.append({
                             "audioUrl": msg.get("audioUrl"),
                             "text": msg.get("text"),
-                        }
+                        })
                     elif t == "done":
                         msg_data = msg.get("message") or {}
                         full = msg_data.get("content") or ""
                         # 记录生成模式（daily/work）——work 模式禁止分条（2026-08-07）
                         self._last_mode = msg_data.get("mode") or None
                         # T-27：companion 的 _send_tts 是 create_task 异步推送——预连接 URL
-                        # 可能在 done 前或后到达。done 前未捕获则保持 WS 打开再等 3 秒
-                        # （提前关闭连接会 WebSocketDisconnect，语音彻底丢失）。
-                        if self._last_voice is None:
-                            try:
-                                for _ in range(3):
-                                    raw2 = await asyncio.wait_for(ws.recv(), timeout=1.0)
-                                    try:
-                                        m2 = json.loads(raw2)
-                                    except json.JSONDecodeError:
-                                        m2 = None
-                                    if m2 and m2.get("type") == "voice_audio":
-                                        self._last_voice = {
-                                            "audioUrl": m2.get("audioUrl"),
-                                            "text": m2.get("text"),
-                                        }
-                                        break
-                            except (asyncio.TimeoutError, websockets.ConnectionClosed):
-                                pass
+                        # 可能在 done 前或后到达（分条语音推多条）。done 后保持 WS 再等
+                        # 最多 6 秒收集剩余 voice_audio（提前关闭连接会 WebSocketDisconnect）。
+                        try:
+                            for _ in range(6):
+                                raw2 = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                                try:
+                                    m2 = json.loads(raw2)
+                                except json.JSONDecodeError:
+                                    m2 = None
+                                if m2 and m2.get("type") == "voice_audio":
+                                    self._last_voices.append({
+                                        "audioUrl": m2.get("audioUrl"),
+                                        "text": m2.get("text"),
+                                    })
+                        except (asyncio.TimeoutError, websockets.ConnectionClosed):
+                            pass
                         if full:
                             return full
                         return "".join(parts) or "（没有回复）"

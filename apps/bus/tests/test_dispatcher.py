@@ -277,3 +277,65 @@ def test_dispatch_chunk_passes_refid_voice(monkeypatch):
     # voice 只随第一条 chunk（2026-08-07：同一完整语音不随分条播 N 遍）
     assert received[0].voice is not None
     assert all(m.voice is None for m in received[1:])
+
+
+def test_dispatch_chunk_matches_voices_list(monkeypatch):
+    """分条语音（2026-08-07）：voices 列表与文字分条顺序一致——chunk i 配 voices[i]。"""
+    from bus.dispatcher import Dispatcher
+    from bus.models import DeliverySequence, DeliveryPolicy, DeliveryChannel, OutboundMessage, OutboundVoice
+
+    received = []
+
+    class FakeStore:
+        def get_inbound(self, mid):
+            return {
+                "id": mid, "status": "pending",
+                "sequence": DeliverySequence(
+                    messageId=mid, targets=[DeliveryChannel.DESKTOP],
+                    policy=DeliveryPolicy.FIXED,
+                ),
+            }
+
+        def mark_outbound(self, mid, status, attempts):
+            pass
+
+        def mark_inbound(self, mid, status):
+            pass
+
+        def get_delivered_chunks(self, mid):
+            return getattr(self, "_delivered", {})
+
+        def set_delivered_chunks(self, mid, chunks):
+            self._delivered = chunks
+
+    class FakeAdapter:
+        def deliver(self, channel, message):
+            received.append(message)
+            return True
+
+    class FakeDispatcher(Dispatcher):
+        def __init__(self):
+            self.store = FakeStore()
+            self.adapter = FakeAdapter()
+
+        def _outbound_for(self, mid, channel):
+            return OutboundMessage(
+                id=mid, target=channel,
+                content="第一句。\n\n第二句。\n\n第三句。",
+                voices=[
+                    OutboundVoice(audioUrl="http://x/1.wav", text="第一句。"),
+                    OutboundVoice(audioUrl="http://x/2.wav", text="第二句。"),
+                    OutboundVoice(audioUrl="http://x/3.wav", text="第三句。"),
+                ],
+            )
+
+        def _attempts(self, mid):
+            return 0
+
+    d = FakeDispatcher()
+    d.dispatch("m3")
+    assert len(received) == 3
+    assert [m.voice.audioUrl if m.voice else None for m in received] == [
+        "http://x/1.wav", "http://x/2.wav", "http://x/3.wav",
+    ]
+    assert [m.content for m in received] == ["第一句。", "第二句。", "第三句。"]

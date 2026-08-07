@@ -110,6 +110,7 @@ class OutboundMessage(BaseModel):
     target: DeliveryChannel
     content: str
     voice: OutboundVoice | None = None
+    voices: list[OutboundVoice] = []  # 分条语音列表（2026-08-07：companion 逐段合成，与文字分条顺序一致）
     critical: bool = False  # 低电量等，绕过 QQ 限频（§3）
     refId: str | None = None
     mode: str | None = None  # companion 生成时的模式（daily/work）——work 模式禁止分条（2026-08-07）
