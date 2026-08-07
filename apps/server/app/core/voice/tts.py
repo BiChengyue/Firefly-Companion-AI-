@@ -324,6 +324,8 @@ class TTSService:
             "text": clean_text,
             "text_lang": "zh",
             "text_language": "zh",
+            # 2026-08-07：整段一次合成（默认 cut5 按句切段再拼接，段间拼接会缺字）
+            "text_split_method": "cut0",
         }
         if ref_audio_path:
             payload["ref_audio_path"] = ref_audio_path
