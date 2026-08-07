@@ -55,12 +55,12 @@ class CompanionBridge:
         self,
         ws_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
-        tts_enabled: bool = False,
+        tts_enabled: bool = True,
         http_url: str | None = None,
     ):
         self.ws_url = ws_url or DEFAULT_COMPANION_WS
         self.timeout = timeout
-        self.tts_enabled = tts_enabled  # 本期默认关 TTS（语音接线 D3 后置）
+        self.tts_enabled = tts_enabled  # 语音默认开（2026-08-07：单轨语音中转完成后默认 True；桌宠 voice_toggle 可关）
         self.http_url = http_url or DEFAULT_COMPANION_HTTP
         self._lock = threading.Lock()
         self._active_ws = None            # 当前活跃生成的连接（单槽：调度线程逐条处理）

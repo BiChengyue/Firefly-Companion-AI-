@@ -226,8 +226,7 @@ if (currentWindow.label === 'pet') {
 // ── 语音开关同步到后端 ──
 watch(() => companion.voiceEnabled, (enabled) => {
   wsClient.send({ type: 'voice_toggle', enabled })
-  if (!enabled) {
-    // 关闭语音：清空队列 + 停止当前播放
+  if (!enabled) {    // 关闭语音：清空队列 + 停止当前播放
     voiceQueue.length = 0
     voicePlaying = false
     if (currentAudio) {
@@ -237,7 +236,7 @@ watch(() => companion.voiceEnabled, (enabled) => {
       currentAudio = null
     }
   }
-})
+}, { immediate: true })  // immediate：初始连接即同步当前语音开关（2026-08-07 补）
 
 // T-27 C：组件卸载（含 HMR 重建）时释放本组件注册的 WS 状态 handler
 onUnmounted(() => {
