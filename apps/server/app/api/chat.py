@@ -586,11 +586,25 @@ async def chat_ws(ws: WebSocket):
             provider = (live_settings.voice.tts.engine or "edge-tts").lower()
             voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
 
-            # 分条：与输出总线 split_reply_chunks 同规则（换行拆 + 最多 4 段，超长合并末段）
-            segs = [s.strip() for s in re.split(r"\n+", clean) if s.strip()]
+            # 分条：与输出总线 split_reply_chunks 完全同规则（换行优先 + 标点 fallback
+            # 累积 ~20 字 + 上限 4 合并末段）——保证语音段与文字分条一一对应
+            segs = [ln.strip() for ln in re.split(r"\n+", clean) if ln.strip()]
+            if len(segs) < 2:
+                sentences = [s.strip() for s in re.split(r"(?<=[。！？!?~])", clean) if s.strip()]
+                if len(sentences) > 1:
+                    segs = []
+                    cur = ""
+                    for s in sentences:
+                        if cur and len(cur) + len(s) > 20 and len(segs) < 3:
+                            segs.append(cur)
+                            cur = s
+                        else:
+                            cur += s
+                    if cur:
+                        segs.append(cur)
             if len(segs) > 4:
                 segs = segs[:3] + ["".join(segs[3:])]
-            if len(segs) <= 1:
+            if not segs:
                 segs = [clean]
 
             # ① 先一次性推送所有段 URL——桌宠立即预加载全部（文件就绪即播），
