@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useCompanionStore } from '@/stores/companion'
+import { useSettingsStore } from '@/stores/settings'
 
 const companion = useCompanionStore()
+const settings = useSettingsStore()
 const container = ref<HTMLDivElement>()
 const canvasWrapper = ref<HTMLDivElement>()
 
@@ -21,11 +23,28 @@ const toastMessage = ref('')
 let toastTimer: number | null = null
 
 function showToast(msg: string) {
-  toastMessage.value = msg
-  if (toastTimer) clearTimeout(toastTimer)
+  // 气泡队列（2026-08-07）：分条消息多条 proactive 几乎同时到达，
+  // 若直接覆盖只显最后一条——改为排队，积压时缩短单条时长逐条闪现。
+  toastQueue.value.push(msg)
+  drainToast()
+}
+
+const toastQueue = ref<string[]>([])
+const TOAST_BASE_MS = 2500
+const TOAST_QUEUE_MS = 1200
+
+function drainToast() {
+  if (toastTimer !== null || toastMessage.value) return // 正在显示
+  if (toastQueue.value.length === 0) return
+  const next = toastQueue.value.shift()!
+  toastMessage.value = next
+  const backlog = toastQueue.value.length
+  const dur = backlog > 0 ? TOAST_QUEUE_MS : TOAST_BASE_MS
   toastTimer = window.setTimeout(() => {
     toastMessage.value = ''
-  }, 2500)
+    toastTimer = null
+    drainToast()
+  }, dur)
 }
 
 let app: any = null
@@ -489,16 +508,18 @@ onMounted(async () => {
     }
 
     // 模型来源（T-20 切单轨配套，2026-08-06）：桌宠（电脑端）加载服务器 companion 的
-    // Live2D 模型。原硬编码 127.0.0.1:8765 只对「桌宠与后端同机」成立，改造后后端在
-    // Tailnet 服务器 → 改指向服务器；可用 localStorage `firefly_model_base` 覆盖。
+    // Live2D 模型。T-27 F 🟡19：优先读设置 httpBaseUrl（与 WeatherWidget getApiBase 对齐），
+    // 其次 localStorage `firefly_model_base` 覆盖，最后回退 Tailnet 服务器默认地址。
     let modelBase = 'http://100.111.201.71:8765'
     try {
       if (typeof localStorage !== 'undefined') {
         const saved = localStorage.getItem('firefly_model_base')
         if (saved) modelBase = saved
       }
+      const httpBase = settings.httpBaseUrl
+      if (httpBase) modelBase = httpBase.replace(/\/+$/, '')
     } catch {
-      // localStorage 不可用 → 用默认
+      // localStorage / store 不可用 → 用默认
     }
     const url = `${modelBase}/static/live2d/firefly/firefly.model3.json`
     model = await Live2DModel.from(url, { ticker: app.ticker })

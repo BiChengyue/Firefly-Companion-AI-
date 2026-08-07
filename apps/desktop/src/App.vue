@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch, ref, computed, defineAsyncComponent } from 'vue'
+import { onMounted, onUnmounted, watch, ref, computed, defineAsyncComponent } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen, emit } from '@tauri-apps/api/event'
 import { useCompanionStore } from '@/stores/companion'
@@ -113,18 +113,31 @@ function showTransition(line: string, toMode: 'daily' | 'work') {
 }
 
 function playVoice(url: string, text: string) {
-  // 停止上一个还未播完的音频
-  if (currentAudio) {
-    currentAudio.pause()
-    currentAudio.onended = null
-    currentAudio.onerror = null
-    currentAudio = null
-  }
+  // 语音队列（2026-08-07）：分条消息 N 条 voice_audio 几乎同时到达，
+  // 原实现「新音频打断旧音频」→ 只听到最后一条——改为排队串行播放，逐条播完。
+  voiceQueue.push({ url, text })
+  drainVoice()
+}
+
+const voiceQueue: { url: string; text: string }[] = []
+let voicePlaying = false
+
+function drainVoice() {
+  if (voicePlaying || voiceQueue.length === 0) return
+  const { url, text } = voiceQueue.shift()!
+  voicePlaying = true
   const audio = new Audio(url)
   currentAudio = audio
-  audio.onended = () => { currentAudio = null }
-  audio.onerror = () => { currentAudio = null }
-  audio.play().catch(() => { currentAudio = null })
+  const finish = () => {
+    voicePlaying = false
+    currentAudio = null
+    audio.onended = null
+    audio.onerror = null
+    drainVoice()
+  }
+  audio.onended = finish
+  audio.onerror = finish
+  audio.play().catch(finish)
   try { emit('play-voice', { text }) } catch {}
   window.dispatchEvent(new CustomEvent('play-voice', { detail: { text } }))
 }
@@ -138,6 +151,9 @@ if (currentWindow.label === 'pet') {
     onVoice: playVoice,
     onTransitionLine: showTransition,
   })
+
+  // T-27 C：App.vue 直接注册的 onStatus 需随组件卸载释放（HMR 重挂载不叠加）
+  let unsubscribeWsStatus: (() => void) | null = null
 
   onMounted(async () => {
     windowLabel.value = currentWindow.label
@@ -174,7 +190,8 @@ if (currentWindow.label === 'pet') {
       checkCoreModelsAndMaybeShowSetup()
 
       // 补充 WS 状态处理：会话层逻辑（模式同步、dailyUnlock 同步、断连保护）
-      wsClient.onStatus((status) => {
+      // T-27 C：保存退订函数，onUnmounted 释放——HMR 重建主窗口时不再叠加重复 handler
+      unsubscribeWsStatus = wsClient.onStatus((status) => {
         // WS 连接建立 → 同步前端模式与 dailyUnlocked 状态到后端
         if (status === 'open') {
           wsClient.send({ type: 'mode_switch', mode: companion.mode })
@@ -210,13 +227,23 @@ if (currentWindow.label === 'pet') {
 watch(() => companion.voiceEnabled, (enabled) => {
   wsClient.send({ type: 'voice_toggle', enabled })
   if (!enabled) {
-    // 关闭语音：停止当前播放
+    // 关闭语音：清空队列 + 停止当前播放
+    voiceQueue.length = 0
+    voicePlaying = false
     if (currentAudio) {
       currentAudio.pause()
       currentAudio.onended = null
       currentAudio.onerror = null
       currentAudio = null
     }
+  }
+})
+
+// T-27 C：组件卸载（含 HMR 重建）时释放本组件注册的 WS 状态 handler
+onUnmounted(() => {
+  if (unsubscribeWsStatus) {
+    unsubscribeWsStatus()
+    unsubscribeWsStatus = null
   }
 })
 </script>
