@@ -5,7 +5,7 @@
 - handleSave / loadProviders / handleRefreshMcp / handleDeleteMcp 等行动函数
 - 子 Tab 组件通过 provide/inject 或 props 获取所需字段
 */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useCompanionStore } from '@/stores/companion'
 import { useSettingsStore } from '@/stores/settings'
 import { wsClient } from '@/services/ws'
@@ -137,6 +137,11 @@ export function useSettingsForm() {
     toolsLoaded.value = true
   }
 
+  // 模型字段显式改动标记（T-27 F 🟡19）：用户没碰 provider/model 就不提交这两个字段，
+  // 防止「仅保存设置」把服务器模型配置切回桌宠默认值（与 apiKey/baseUrl 空值不提交同一防御原则）
+  const llmDirty = ref(false)
+  watch([formLlmProvider, formLlmModel], () => { llmDirty.value = true })
+
   // ── 保存 ──
   async function handleSave() {
     const config = {
@@ -164,12 +169,15 @@ export function useSettingsForm() {
     try {
       // llm.apiKey / baseUrl 为空时不提交（服务器保留原值）——防止桌宠默认空配置覆盖
       // 服务器真实凭据（2026-08-07 修复：默认 glm-4-plus + 空 key 曾覆盖服务器 DeepSeek 配置）
+      // T-27 F 🟡19：provider/model 仅用户显式改动时提交（llmDirty），model 空值不提交
       const llmBody: Record<string, unknown> = {
-        provider: 'openai_compat',
-        model: config.llmModel,
         maxTokens: config.llmMaxTokens,
         temperature: config.llmTemperature,
         enableThinking: config.llmEnableThinking,
+      }
+      if (llmDirty.value) {
+        llmBody.provider = formLlmProvider.value
+        if (config.llmModel) llmBody.model = config.llmModel
       }
       if (config.apiKey) llmBody.apiKey = config.apiKey
       if (config.llmBaseUrl) llmBody.baseUrl = config.llmBaseUrl

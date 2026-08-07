@@ -10,7 +10,6 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
@@ -41,7 +40,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://100.111.201.71:8765; media-src 'self' data: blob: http://100.111.201.71:8765; connect-src 'self' ipc: http://ipc.localhost http://100.111.201.71:8765 ws://100.111.201.71:8767 http://127.0.0.1:8765 ws://127.0.0.1:8767; font-src 'self' data:"
     }
   },
   "bundle": {

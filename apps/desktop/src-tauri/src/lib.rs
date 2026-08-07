@@ -6,16 +6,35 @@ mod window;
 
 use tauri::Manager;
 
-/// 读桌宠总线 token 配置文件（T-20 切单轨配套，2026-08-06）
-/// 路径：%APPDATA%\firefly-desktop\bus-token.txt（格式同服务器 bus-token.txt：
-/// `BUS_WS_TOKEN=<hex>` 或裸 token）。桌宠前端经 invoke 预载到 localStorage
+/// 读桌宠总线 token 配置文件（T-20 切单轨配套，2026-08-06；T-27 B 补兜底路径）
+/// 路径优先级：
+///   1) %APPDATA%\firefly-desktop\bus-token.txt（桌宠机本地，用户手动放置/分发）
+///   2) %ProgramData%\firefly-bot\bus-token.txt（服务器/同机部署时 install.ps1
+///      -PersistTokens 落盘处；ACL 为 SYSTEM/Administrators，普通用户进程读不到时自然跳过）
+/// 文件格式：`BUS_WS_TOKEN=<hex>` 或裸 token。桌宠前端经 invoke 预载到 localStorage
 /// （firefly_bus_ws_token），随后 resolveBusWsUrl() 自动带上 ?token=。
 #[tauri::command]
 fn read_bus_token() -> Option<String> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    let path = std::path::Path::new(&appdata)
-        .join("firefly-desktop")
-        .join("bus-token.txt");
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        candidates.push(
+            std::path::Path::new(&appdata).join("firefly-desktop").join("bus-token.txt"),
+        );
+    }
+    if let Ok(program_data) = std::env::var("ProgramData") {
+        candidates.push(
+            std::path::Path::new(&program_data).join("firefly-bot").join("bus-token.txt"),
+        );
+    }
+    for path in candidates {
+        if let Some(tok) = read_token_file(&path) {
+            return Some(tok);
+        }
+    }
+    None
+}
+
+fn read_token_file(path: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let line = line.trim();

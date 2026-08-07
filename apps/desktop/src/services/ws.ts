@@ -39,37 +39,25 @@ export function resolveBusWsUrl(): string {
 
 // T-20 切单轨配套：启动时经 Tauri invoke 从配置文件（%APPDATA%\firefly-desktop\bus-token.txt）
 // 预载 bus token 到 localStorage，使 resolveBusWsUrl() 自动带上 ?token=。
-// 纯浏览器/测试环境无 __TAURI__ → 静默跳过（仍可用 localStorage 手动配置）。
-// 修复（2026-08-06）：先取 invoke 引用再判空 + 整体 try/catch——
-// 桌宠未开 withGlobalTauri 时 window.__TAURI__ 为 undefined，链式 .then 会抛 TypeError
-// 中断模块加载，导致整个前端崩溃（main 白屏 + pet 透明无 Live2D）。
+// T-27 D：移除 withGlobalTauri 后不再有 window.__TAURI__ —— 改用 @tauri-apps/api/core 动态导入
+// （动态导入避免模块顶层依赖 Tauri 全局；纯浏览器/vitest 环境不触发，静默跳过——
+//   仍可用 localStorage 手动配置）。整体 .catch 兜底：绝不中断模块加载（防白屏）。
 if (typeof window !== 'undefined') {
-  try {
-    const tauri = (
-      window as {
-        __TAURI__?: { core?: { invoke?: (cmd: string) => Promise<unknown> } }
+  import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke('read_bus_token'))
+    .then((t: unknown) => {
+      if (typeof t === 'string' && t) {
+        try {
+          localStorage.setItem('firefly_bus_ws_token', t)
+          console.log('[WS] 已从配置文件载入 bus token')
+        } catch {
+          // localStorage 不可用 → 忽略
+        }
       }
-    ).__TAURI__
-    const invoke = tauri?.core?.invoke
-    if (invoke) {
-      invoke('read_bus_token')
-        .then((t: unknown) => {
-          if (typeof t === 'string' && t) {
-            try {
-              localStorage.setItem('firefly_bus_ws_token', t)
-              console.log('[WS] 已从配置文件载入 bus token')
-            } catch {
-              // localStorage 不可用 → 忽略
-            }
-          }
-        })
-        .catch(() => {
-          // 配置文件不存在/command 未注册 → 忽略
-        })
-    }
-  } catch {
-    // 非 Tauri 环境/异常 → 忽略（绝不中断模块加载）
-  }
+    })
+    .catch(() => {
+      // 非 Tauri 环境/command 未注册/配置文件不存在 → 忽略
+    })
 }
 
 /**

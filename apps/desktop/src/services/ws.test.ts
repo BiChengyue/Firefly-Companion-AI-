@@ -285,3 +285,50 @@ describe('resolveBusWsUrl — 总线地址解析（localStorage 覆盖）', () =
     expect(resolveBusWsUrl()).toBe('ws://host:8767/ws/desktop?x=1&token=t')
   })
 })
+
+// ── T-27 F 🟡20：dynamicUrl 重连重新 resolve / token 重解析 / onStatus 退订回归 ──
+
+describe('WsClient — dynamicUrl 重连重新 resolve（T-26 🟠7 / T-27 F）', () => {
+  function stubStorage(init: Record<string, string>) {
+    const map = new Map(Object.entries(init))
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => { map.set(k, v) },
+      removeItem: (k: string) => { map.delete(k) },
+    })
+  }
+
+  it('dynamicUrl 模式下重连时重新读取 localStorage 地址与 token', () => {
+    stubStorage({
+      firefly_server_url: 'ws://10.0.0.5:8767/ws/desktop',
+      firefly_bus_ws_token: 'tok-abc',
+    })
+    const client = new WsClient() // 不传 URL → dynamicUrl=true（生产单例同款）
+    client.connect()
+    const first = MockWebSocket.instances[MockWebSocket.instances.length - 1]!
+    expect(first.url).toBe('ws://10.0.0.5:8767/ws/desktop?token=tok-abc')
+    first.emitOpen()
+
+    // 用户保存新地址 + 新 token（T-18 设置保存）→ 断线重连后 URL 重新解析
+    stubStorage({
+      firefly_server_url: 'ws://10.0.0.6:8767/ws/desktop',
+      firefly_bus_ws_token: 'tok-def',
+    })
+    first.emitClose() // 非手动关闭 → 触发重连
+    vi.advanceTimersByTime(1000)
+    const second = MockWebSocket.instances[MockWebSocket.instances.length - 1]!
+    expect(second).not.toBe(first)
+    expect(second.url).toBe('ws://10.0.0.6:8767/ws/desktop?token=tok-def')
+  })
+
+  it('onStatus 退订函数释放后不再收到状态回调（App.vue onUnmounted 回归锚点）', () => {
+    const client = new WsClient()
+    const seen: string[] = []
+    const unsub = client.onStatus((s) => seen.push(s))
+    expect(seen).toHaveLength(1) // onStatus 注册时立即推送一次当前状态
+    unsub() // T-27 C：App.vue onUnmounted 调用同样的退订
+    client.connect()
+    MockWebSocket.instances[MockWebSocket.instances.length - 1]!.emitOpen()
+    expect(seen).toHaveLength(1) // 退订后 connecting/open 不再追加
+  })
+})
