@@ -110,6 +110,10 @@ async def get_weather(city: str = Query(..., min_length=1, description="城市�
         loc = (exact or pool)[0]
         lat, lon = loc["latitude"], loc["longitude"]
 
+    # 防御：loc 未赋值时兜底（2026-08-07：个别城市名触发 UnboundLocalError → 500）
+    if "loc" not in locals() or loc is None:
+        loc = {"name": city, "latitude": 0, "longitude": 0}
+
     # ② 取实时天气 + 今日最高/最低温
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
