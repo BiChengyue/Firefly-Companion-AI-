@@ -155,6 +155,10 @@ const resourceBars = computed(() => {
   padding: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* T-29 需求：先从上到下再从左到右（列填充）——左列三个有端口的，右列三个无端口的
+     （当前固定 6 服务 = 2 列 × 3 行；若服务数变化需同步调整 repeat(3)） */
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, auto);
   gap: 3px 10px;
 }
 .service {
