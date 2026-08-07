@@ -593,19 +593,21 @@ async def chat_ws(ws: WebSocket):
             if len(segs) <= 1:
                 segs = [clean]
 
+            # ① 先一次性推送所有段 URL——桌宠立即预加载全部（文件就绪即播），
+            #    生成流水线化：听段 1 时段 2 已在生成，段间几乎无缝（2026-08-07）
+            urls: list[str] = []
             for seg in segs:
-                # 提前算出缓存 key 和 URL（结合 provider, voice_id 与段文本）
                 cache_key = hashlib.md5(f"{provider}_{voice_id}_{seg}".encode("utf-8")).hexdigest()
                 audio_url = f"http://127.0.0.1:8765/api/voice/file/{cache_key}.wav"
-
-                # ① 先发 URL，浏览器立即发起 GET（此时文件尚不存在，端点轮询等待）
+                urls.append(audio_url)
                 await _send_json(ws, {
                     "type": "voice_audio",
                     "audioUrl": audio_url,
                     "text": seg,
                 })
 
-                # ② 再生成 TTS，写入缓存文件 → 浏览器的等待 GET 立即解除
+            # ② 逐段生成（引擎单实例串行，物理限制；文件依次就绪，桌宠播完一段下一段已好）
+            for seg in segs:
                 await svc.generate_speech(seg, provider=provider, voice_id=voice_id)
                 logger.info("推送 TTS (%s/%s): %s...", provider, voice_id, seg[:20])
         except Exception as e:
