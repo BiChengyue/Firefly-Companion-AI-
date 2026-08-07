@@ -9,6 +9,7 @@
 """
 import json
 import logging
+import os
 import threading
 import time
 
@@ -18,6 +19,7 @@ from bus.models import (
     DeliveryChannel,
     MessageSource,
     OutboundMessage,
+    OutboundVoice,
 )
 from bus.output_bus import OutputBus
 from bus.reachability import ReachabilityTracker
@@ -188,10 +190,24 @@ class Scheduler:
         critical = is_critical_kind(inbound.get("kind"), inbound.get("meta"))
         # work 模式禁止分条（2026-08-07 用户要求）：把生成模式透传给输出总线
         # getattr 防御：测试桩等旧接口可能无 last_mode
+        # 注（T-27 F 🟡17）：bridge.last_mode 是共享可变状态；调度为单线程串行
+        #   （生成→emit→dispatch 同一调用栈），「生成完毕读 last_mode」无交错——
+        #   多消费者化之前安全；若未来并发消费需改为随生成返回的 mode 显式传递。
         gen_mode = getattr(self.bridge, "last_mode", None)
+        # T-27：单轨后语音中转——companion 推的 voice_audio 经 bus 组装进 outbound，
+        # DesktopAdapter 会再推 voice_audio 事件给桌宠（前端零改动）。
+        # audioUrl 是 companion 本机视角（127.0.0.1:8765）——对外投递前换成 bus 可达的公网/Tailnet 地址。
+        voice = None
+        last_voice = getattr(self.bridge, "last_voice", None)
+        if last_voice and last_voice.get("audioUrl"):
+            public_ip = os.environ.get("BUS_PUBLIC_IP", "127.0.0.1")
+            audio_url = last_voice["audioUrl"]
+            if "127.0.0.1" in audio_url:
+                audio_url = audio_url.replace("127.0.0.1", public_ip)
+            voice = OutboundVoice(audioUrl=audio_url, text=last_voice.get("text"))
         OutputBus(self.store).emit(OutboundMessage(
             id=message_id, target=first_target, content=reply, critical=critical,
-            mode=gen_mode,
+            mode=gen_mode, voice=voice,
         ))
         acks = self.dispatcher.dispatch(message_id, reachability=self.tracker.current())
         _log.info(

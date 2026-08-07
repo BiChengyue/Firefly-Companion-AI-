@@ -67,11 +67,17 @@ class CompanionBridge:
         self._active_loop = None          # 活跃连接所属事件循环
         self._cancelled = False           # 最近一次生成是否被 cancel
         self._last_mode: str | None = None  # 最近一次生成模式（done.message.mode）——work 禁分条（2026-08-07）
+        self._last_voice: dict | None = None  # 最近一次生成捕获的 voice_audio（T-27：单轨后语音中转）
 
     @property
     def last_mode(self) -> str | None:
         """最近一次生成返回的模式（daily/work）。work 模式禁止分条。"""
         return self._last_mode
+
+    @property
+    def last_voice(self) -> dict | None:
+        """最近一次生成捕获的语音（companion 推的 voice_audio：audioUrl/text），供输出总线组装。"""
+        return self._last_voice
 
     async def generate(
         self,
@@ -110,6 +116,24 @@ class CompanionBridge:
                         full = msg_data.get("content") or ""
                         # 记录生成模式（daily/work）——work 模式禁止分条（2026-08-07）
                         self._last_mode = msg_data.get("mode") or None
+                        # T-27：捕获 companion 异步推送的 voice_audio（done 后 1-3 秒内到达，
+                        # 预连接 URL 先发、TTS 生成在后）——单轨后 bus 中转语音给桌宠。
+                        self._last_voice = None
+                        try:
+                            for _ in range(4):  # 最多等 4 条后续消息 / 3 秒
+                                raw2 = await asyncio.wait_for(ws.recv(), timeout=1.5)
+                                try:
+                                    m2 = json.loads(raw2)
+                                except json.JSONDecodeError:
+                                    continue
+                                if m2.get("type") == "voice_audio":
+                                    self._last_voice = {
+                                        "audioUrl": m2.get("audioUrl"),
+                                        "text": m2.get("text"),
+                                    }
+                                    break
+                        except (asyncio.TimeoutError, websockets.ConnectionClosed):
+                            pass
                         if full:
                             return full
                         return "".join(parts) or "（没有回复）"
