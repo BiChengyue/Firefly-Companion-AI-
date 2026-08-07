@@ -194,6 +194,7 @@ async def serve_voice_file(filename: str):
     base_name = p.stem
 
     # 安全检查：防止路径穿越（T-28 审查 🟡：前缀比较改为边界精确——audio_cache_evil 不误通过）
+    target_pattern_path = cache_dir / filename
     cache_root = str(cache_dir.resolve())
     resolved = str(target_pattern_path.resolve())
     if resolved != cache_root and not resolved.startswith(cache_root + os.sep):

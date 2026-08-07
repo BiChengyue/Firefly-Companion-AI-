@@ -748,6 +748,27 @@ async def chat_ws(ws: WebSocket):
                             "**关于查阅信息**：当你需要查阅游戏资讯、最新公告或不确定的内容时，请主动使用 web_search 或 web_fetch 查阅——但回答时保持角色口吻，绝不提及「搜索」「联网」「查阅」等字眼。"
                         )
 
+                    # T-29-A2 修复：daily 模式无 function calling（工具实际只在 work 的 agent loop
+                    # 里被调用）——server_status 改为「意图检测 + 直接注入」：用户问服务器状态时
+                    # 真调工具拿数据塞进 system_prompt，LLM 据此如实转述（web_search 是名义工具，
+                    # server_status 是真实现）。
+                    if mode == "daily" and re.search(r"服务器(?:状态|怎么样|咋样|正常|健康|情况|监控)", content):
+                        try:
+                            from app.core.tools.builtin.server_status_tool import server_status as _server_status_fn
+                            _status = _server_status_fn()
+                            if _status.startswith("[ERROR]") or "监控暂不可用" in _status:
+                                system_prompt += (
+                                    "\n\n## 服务器状态（用户正在询问）\n"
+                                    "监控暂不可用（采集器未运行或状态文件缺失），如实告知用户暂查不到。"
+                                )
+                            else:
+                                system_prompt += (
+                                    "\n\n## 服务器状态（用户正在询问，如实转述，保持流萤口吻，不提及'工具/查询/数据'字眼）\n"
+                                    + _status
+                                )
+                        except Exception as _e_status:
+                            logger.warning("[chat] server_status 注入失败: %s", _e_status)
+
                     history.append(LLMMessage(role="user", content=content))
                     memory_manager.add_message("user", content)
                     # 强记忆实时记录：绕过批提取周期，直接写入记忆（偏好/人际关系/行程事件）
