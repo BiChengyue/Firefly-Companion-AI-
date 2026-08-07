@@ -141,6 +141,14 @@ export function useSettingsForm() {
   // 防止「仅保存设置」把服务器模型配置切回桌宠默认值（与 apiKey/baseUrl 空值不提交同一防御原则）
   const llmDirty = ref(false)
   watch([formLlmProvider, formLlmModel], () => { llmDirty.value = true })
+  // T-29 修复：apiKey/baseUrl 也加 dirty 守卫——localStorage 残留（T-27 时代智谱 URL/旧 key）
+  // 会在「仅开 Reasoning 保存」时被提交覆盖服务器真实配置（实测：baseUrl 被覆盖为
+  // open.bigmodel.cn → DeepSeek key 调智谱 URL → 401 生成失败）。加载时 watch 触发无害
+  // （提交的是服务器当前值）；未加载/未改动则 dirty=false 不提交。
+  const llmApiKeyDirty = ref(false)
+  const llmBaseUrlDirty = ref(false)
+  watch(formApiKey, () => { llmApiKeyDirty.value = true })
+  watch(formLlmBaseUrl, () => { llmBaseUrlDirty.value = true })
 
   // ── 保存 ──
   async function handleSave() {
@@ -179,8 +187,9 @@ export function useSettingsForm() {
         llmBody.provider = formLlmProvider.value
         if (config.llmModel) llmBody.model = config.llmModel
       }
-      if (config.apiKey) llmBody.apiKey = config.apiKey
-      if (config.llmBaseUrl) llmBody.baseUrl = config.llmBaseUrl
+      // T-29：apiKey/baseUrl 仅用户显式改动时提交（防 localStorage 残留覆盖服务器真实配置）
+      if (config.apiKey && llmApiKeyDirty.value) llmBody.apiKey = config.apiKey
+      if (config.llmBaseUrl && llmBaseUrlDirty.value) llmBody.baseUrl = config.llmBaseUrl
       await updateConfig({
         llm: llmBody,
         voice: {
