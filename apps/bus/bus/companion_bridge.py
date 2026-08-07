@@ -111,29 +111,34 @@ class CompanionBridge:
                         delta = msg.get("delta", "")
                         if delta:
                             parts.append(delta)
+                    elif t == "voice_audio":
+                        # T-27 语音中转：voice_audio 可能在 done 之前到达（_send_tts 的
+                        # create_task 先于 done 启动，预连接 URL 先发）——任何位置都捕获。
+                        self._last_voice = {
+                            "audioUrl": msg.get("audioUrl"),
+                            "text": msg.get("text"),
+                        }
                     elif t == "done":
                         msg_data = msg.get("message") or {}
                         full = msg_data.get("content") or ""
                         # 记录生成模式（daily/work）——work 模式禁止分条（2026-08-07）
                         self._last_mode = msg_data.get("mode") or None
-                        # T-27：捕获 companion 异步推送的 voice_audio（done 后 1-3 秒内到达，
-                        # 预连接 URL 先发、TTS 生成在后）——单轨后 bus 中转语音给桌宠。
-                        self._last_voice = None
-                        try:
-                            for _ in range(4):  # 最多等 4 条后续消息 / 3 秒
+                        # T-27：done 前未捕获 voice_audio（理论上 TTS 已启动），再等 1.5s 兜底；
+                        # done 前已捕获则不重置（避免丢弃）。
+                        if self._last_voice is None:
+                            try:
                                 raw2 = await asyncio.wait_for(ws.recv(), timeout=1.5)
                                 try:
                                     m2 = json.loads(raw2)
                                 except json.JSONDecodeError:
-                                    continue
-                                if m2.get("type") == "voice_audio":
+                                    m2 = None
+                                if m2 and m2.get("type") == "voice_audio":
                                     self._last_voice = {
                                         "audioUrl": m2.get("audioUrl"),
                                         "text": m2.get("text"),
                                     }
-                                    break
-                        except (asyncio.TimeoutError, websockets.ConnectionClosed):
-                            pass
+                            except (asyncio.TimeoutError, websockets.ConnectionClosed):
+                                pass
                         if full:
                             return full
                         return "".join(parts) or "（没有回复）"
