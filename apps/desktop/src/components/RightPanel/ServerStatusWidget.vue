@@ -40,6 +40,13 @@ async function refresh() {
 const runningCount = computed(() =>
   monitor.value?.services.filter((s) => s.status === 'running').length ?? 0,
 )
+// T-29 需求：有端口信息的服务排前面（bus/companion/gsv），无端口的排后面（qbot/push/frpc）
+const sortedServices = computed(() => {
+  const list = monitor.value?.services ?? []
+  const hasPort = (s: { ports?: Record<string, boolean> }) =>
+    Object.keys(s.ports ?? {}).some((p) => s.ports?.[p])
+  return [...list.filter(hasPort), ...list.filter((s) => !hasPort(s))]
+})
 const resourceBars = computed(() => {
   const r = monitor.value?.resource
   if (!r) return []
@@ -62,7 +69,7 @@ const resourceBars = computed(() => {
 
     <template v-else-if="monitor">
       <ul class="services">
-        <li v-for="s in monitor.services" :key="s.name" class="service">
+        <li v-for="s in sortedServices" :key="s.name" class="service">
           <span class="dot" :class="s.status === 'running' ? 'up' : 'down'" />
           <span class="name">{{ s.name }}</span>
           <span class="ports">{{ Object.keys(s.ports).filter((p) => s.ports[p]).join('/') }}</span>
