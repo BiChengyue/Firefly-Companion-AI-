@@ -116,20 +116,33 @@ class Dispatcher:
             else:
                 chunks = split_reply_chunks(outbound.content)
             ok = True
-            for chunk in chunks:
+            # 分条幂等（T-26 🟠4）：已送达 chunk 数持久化在 outbox.delivered_chunks，
+            # 失败重试时跳过已送达部分，避免用户收到重复内容。
+            delivered_counts = self.store.get_delivered_chunks(message_id)
+            start_idx = delivered_counts.get(target.value, 0)
+            if start_idx > 0 and start_idx < len(chunks):
+                _log.info("chunk retry skip %s -> %s: 已送达 %d/%d", message_id, target.value, start_idx, len(chunks))
+            for idx in range(start_idx, len(chunks)):
+                chunk = chunks[idx]
                 chunk_ob = OutboundMessage(
                     id=outbound.id,
                     target=target,
                     content=chunk,
                     critical=outbound.critical,
                     action=outbound.action,
+                    refId=outbound.refId,   # T-26 🟠5：chunk 透传 refId（主动消息↔回复关联）
+                    voice=outbound.voice,   # T-26 🟠5：chunk 透传 voice（语音推送契约字段）
+                    mode=outbound.mode,
                 )
                 try:
                     ok = self.adapter.deliver(target, chunk_ob)
                 except Exception as e:  # 通道异常视为投递失败（不抛出，避免整条标 failed 白耗重生成）
                     _log.warning("deliver %s -> %s raised: %s", message_id, target.value, e)
                     ok = False
-                if not ok:
+                if ok:
+                    delivered_counts[target.value] = idx + 1
+                    self.store.set_delivered_chunks(message_id, delivered_counts)
+                else:
                     break  # 当前条失败 → 该消息视为投递失败（不再发后续条）
             status = "delivered" if ok else "failed"
             acks.append(DeliveryAck(messageId=message_id, channel=target, status=status))

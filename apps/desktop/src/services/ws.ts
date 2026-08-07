@@ -213,4 +213,4 @@ export class WsClient {
   }
 }
 
-export const wsClient = new WsClient(resolveBusWsUrl())
+export const wsClient = new WsClient()  // 不传 URL：dynamicUrl=true，重连时重新 resolve（token 预载/设置变更生效）

@@ -46,6 +46,12 @@ def test_dispatch_splits_chunks(monkeypatch):
         def mark_inbound(self, mid, status):
             pass
 
+        def get_delivered_chunks(self, mid):
+            return getattr(self, "_delivered", {})
+
+        def set_delivered_chunks(self, mid, chunks):
+            self._delivered = chunks
+
     class FakeAdapter:
         def deliver(self, channel, message):
             received.append(message.content)
@@ -93,6 +99,9 @@ def test_dispatch_work_mode_no_split(monkeypatch):
     from bus.dispatcher import Dispatcher
     from bus.models import DeliverySequence, DeliveryPolicy, DeliveryChannel, OutboundMessage
 
+    from bus.dispatcher import Dispatcher
+    from bus.models import DeliverySequence, DeliveryPolicy, DeliveryChannel, OutboundMessage, OutboundVoice
+
     received = []
 
     class FakeStore:
@@ -110,6 +119,12 @@ def test_dispatch_work_mode_no_split(monkeypatch):
 
         def mark_inbound(self, mid, status):
             pass
+
+        def get_delivered_chunks(self, mid):
+            return getattr(self, "_delivered", {})
+
+        def set_delivered_chunks(self, mid, chunks):
+            self._delivered = chunks
 
     class FakeAdapter:
         def deliver(self, channel, message):
@@ -134,3 +149,129 @@ def test_dispatch_work_mode_no_split(monkeypatch):
     d.dispatch("m2")
     assert len(received) == 1  # work 模式不分条
     assert "\n\n" in received[0]
+
+
+def test_dispatch_chunk_retry_skips_delivered(monkeypatch):
+    """分条幂等（T-26 🟠4）：失败重试跳过已送达 chunk，不重复投递。
+
+    首次投递第 1 条成功、第 2 条失败 → status=failed；
+    重试时 delivered_chunks 记录已送达 1 条 → 只投剩余 3 条。
+    """
+    from bus.dispatcher import Dispatcher
+    from bus.models import DeliverySequence, DeliveryPolicy, DeliveryChannel, OutboundMessage, OutboundVoice
+
+    received = []
+    state = {"failures": 1}
+
+    class FakeStore:
+        def get_inbound(self, mid):
+            return {
+                "id": mid, "status": "pending",
+                "sequence": DeliverySequence(
+                    messageId=mid, targets=[DeliveryChannel.DESKTOP],
+                    policy=DeliveryPolicy.FIXED,
+                ),
+            }
+
+        def mark_outbound(self, mid, status, attempts):
+            pass
+
+        def mark_inbound(self, mid, status):
+            pass
+
+        def get_delivered_chunks(self, mid):
+            return getattr(self, "_delivered", {})
+
+        def set_delivered_chunks(self, mid, chunks):
+            self._delivered = chunks
+
+    class FakeAdapter:
+        def deliver(self, channel, message):
+            received.append(message.content)
+            if len(received) == 2 and state["failures"] > 0:
+                state["failures"] -= 1
+                return False  # 第 1 条送达后，第 2 条失败（验证重试跳过已送达的第 1 条）
+            return True
+
+    class FakeDispatcher(Dispatcher):
+        def __init__(self):
+            self.store = FakeStore()
+            self.adapter = FakeAdapter()
+
+        def _outbound_for(self, mid, channel):
+            return OutboundMessage(
+                id=mid, target=channel,
+                content="第一句。\n\n第二句。\n\n第三句。\n\n第四句。",
+            )
+
+        def _attempts(self, mid):
+            return 0
+
+    d = FakeDispatcher()
+    # 首次：第 1 条送达，第 2 条尝试失败 → failed
+    acks1 = d.dispatch("m1")
+    assert acks1[0].status == "failed"
+    assert received.count("第一句。") == 1
+    # 重试：跳过已送达的第 1 条（不重复），投剩余 2/3/4 → delivered
+    acks2 = d.dispatch("m1")
+    assert acks2[0].status == "delivered"
+    assert received.count("第一句。") == 1  # 已送达的绝不再投
+    assert received.count("第二句。") == 2  # 失败条在重试时补投
+    assert received[-2:] == ["第三句。", "第四句。"]
+
+
+def test_dispatch_chunk_passes_refid_voice(monkeypatch):
+    """分条 chunk 透传 refId/voice（T-26 🟠5）：语音推送与主动消息关联不因分条断裂。"""
+    from bus.dispatcher import Dispatcher
+    from bus.models import DeliverySequence, DeliveryPolicy, DeliveryChannel, OutboundMessage, OutboundVoice
+
+    received = []
+
+    class FakeStore:
+        def get_inbound(self, mid):
+            return {
+                "id": mid, "status": "pending",
+                "sequence": DeliverySequence(
+                    messageId=mid, targets=[DeliveryChannel.DESKTOP],
+                    policy=DeliveryPolicy.FIXED,
+                ),
+            }
+
+        def mark_outbound(self, mid, status, attempts):
+            pass
+
+        def mark_inbound(self, mid, status):
+            pass
+
+        def get_delivered_chunks(self, mid):
+            return getattr(self, "_delivered", {})
+
+        def set_delivered_chunks(self, mid, chunks):
+            self._delivered = chunks
+
+    class FakeAdapter:
+        def deliver(self, channel, message):
+            received.append(message)
+            return True
+
+    class FakeDispatcher(Dispatcher):
+        def __init__(self):
+            self.store = FakeStore()
+            self.adapter = FakeAdapter()
+
+        def _outbound_for(self, mid, channel):
+            return OutboundMessage(
+                id=mid, target=channel,
+                content="第一句。\n\n第二句。",
+                refId="ref-123",
+                voice=OutboundVoice(audioUrl="http://x/a.wav", text="第一句。", durationMs=1000),
+            )
+
+        def _attempts(self, mid):
+            return 0
+
+    d = FakeDispatcher()
+    d.dispatch("m2")
+    assert len(received) == 2
+    assert all(m.refId == "ref-123" for m in received)
+    assert all(m.voice is not None for m in received)

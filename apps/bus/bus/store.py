@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS outbox (
     status       TEXT NOT NULL DEFAULT 'pending',
     attempts     INTEGER NOT NULL DEFAULT 0,
     created_at   INTEGER NOT NULL,
-    delivered_at INTEGER
+    delivered_at INTEGER,
+    delivered_chunks TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbox_message ON outbox(message_id);
@@ -97,6 +98,10 @@ def _get_conn(db_path: Optional[str] = None) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(_DDL)
+        # 迁移：outbox.delivered_chunks（2026-08-07 分条幂等）——旧库补列
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(outbox)").fetchall()]
+        if "delivered_chunks" not in cols:
+            conn.execute("ALTER TABLE outbox ADD COLUMN delivered_chunks TEXT NOT NULL DEFAULT '{}'")
         conn.commit()
         setattr(_local, key, conn)
     return conn
@@ -275,6 +280,27 @@ class BusStore:
                 "UPDATE outbox SET status=?, attempts=?, delivered_at=CASE WHEN ?='delivered' THEN ? ELSE delivered_at END "
                 "WHERE id=?",
                 (status, attempts, status, _now_ms(), message_id),
+            )
+            conn.commit()
+
+    def get_delivered_chunks(self, message_id: str) -> dict:
+        """读该消息各通道已送达 chunk 数（{channel: count}）——分条幂等：失败重试跳过已送达部分（2026-08-07）。"""
+        row = _get_conn(self._db_path).execute(
+            "SELECT delivered_chunks FROM outbox WHERE id=?", (message_id,)
+        ).fetchone()
+        if not row or not row[0]:
+            return {}
+        try:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
+            return {}
+
+    def set_delivered_chunks(self, message_id: str, chunks: dict) -> None:
+        conn = _get_conn(self._db_path)
+        with _write_lock:
+            conn.execute(
+                "UPDATE outbox SET delivered_chunks=? WHERE id=?",
+                (json.dumps(chunks, ensure_ascii=False), message_id),
             )
             conn.commit()
 
