@@ -14,7 +14,7 @@ import threading
 import time
 
 from bus.companion_bridge import CompanionBridge, resolve_session_id
-from bus.dispatcher import Dispatcher
+from bus.dispatcher import Dispatcher, split_reply_chunks
 from bus.models import (
     DeliveryChannel,
     MessageSource,
@@ -204,6 +204,7 @@ class Scheduler:
             if "127.0.0.1" in audio_url:
                 audio_url = audio_url.replace("127.0.0.1", os.environ.get("BUS_PUBLIC_IP", "127.0.0.1"))
             voices.append(OutboundVoice(audioUrl=audio_url, text=v.get("text")))
+        _log.info("message %s voices=%d text_chunks=%d", message_id, len(voices), len(split_reply_chunks(reply)))
         voice = voices[0] if voices else None
         OutputBus(self.store).emit(OutboundMessage(
             id=message_id, target=first_target, content=reply, critical=critical,
