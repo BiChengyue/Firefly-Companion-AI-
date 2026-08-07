@@ -140,8 +140,13 @@ class QqAdapter:
             _log.warning("qq adapter not configured (appid/secret/openid)")
             return False
         # 档位长度兜底截断（生成侧尺度优先，adapter 只做保险）
+        # T-27 A：截断尊重换行边界——超长时优先在最近换行处截断，避免切在句中丢语义。
         max_len = TIER_MAX_LEN[self.tier]
-        content = message.content if len(message.content) <= max_len else message.content[:max_len]
+        content = message.content
+        if len(content) > max_len:
+            cut = content[:max_len]
+            nl = cut.rfind("\n")
+            content = cut[:nl] if nl > 0 else cut
         try:
             token = self._get_token()
             self._send_fn(token, content)

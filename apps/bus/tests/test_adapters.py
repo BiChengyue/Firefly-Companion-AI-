@@ -88,6 +88,27 @@ def test_qq_adapter_tier_truncation():
     assert len(sent[0]) == 80  # normal 档位上限 80
 
 
+def test_qq_adapter_tier_truncation_respects_newline():
+    """T-27 A：档位截断尊重换行边界——超长多行内容在最近换行处截断，不切半句。"""
+    limiter = QqRateLimiter(daily=10, hourly=10)
+    sent = []
+    adapter = QqAdapter(appid="a", secret="s", openid="o", limiter=limiter, tier="normal",
+                        send_fn=lambda t, c: sent.append(c), token_fn=lambda a, s: "tok")
+    content = "短句一\n" + "x" * 200 + "\n尾段"
+    adapter.deliver(DeliveryChannel.QQ, _out(DeliveryChannel.QQ, content=content))
+    assert sent[0] == "短句一"  # 在首个换行边界截断，不切进长行
+
+
+def test_qq_adapter_tier_truncation_no_newline_fallback():
+    """T-27 A：无换行时回退原截断语义（纯长串仍按档位上限截断）。"""
+    limiter = QqRateLimiter(daily=10, hourly=10)
+    sent = []
+    adapter = QqAdapter(appid="a", secret="s", openid="o", limiter=limiter, tier="ambiguous",
+                        send_fn=lambda t, c: sent.append(c), token_fn=lambda a, s: "tok")
+    adapter.deliver(DeliveryChannel.QQ, _out(DeliveryChannel.QQ, content="x" * 300))
+    assert len(sent[0]) == 120  # ambiguous 档位上限 120
+
+
 def test_qq_adapter_wrong_channel_false():
     adapter = QqAdapter(appid="a", secret="s", openid="o", send_fn=lambda t, c: None, token_fn=lambda a, s: "tok")
     assert adapter.deliver(DeliveryChannel.DESKTOP, _out(DeliveryChannel.DESKTOP)) is False

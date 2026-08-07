@@ -312,3 +312,41 @@ def test_deliver_exception_treated_as_failure(tmp_path):
     assert acks and acks[0].status == "failed"
     # 关键：生成内容保留（outbox 未被清掉），重试只重派发不重生成
     assert store.get_outbound(msg.id)["content"] == "内容已生成"
+
+
+# ── T-27 A：QQ 通道不分条 / desktop 分条 ──
+
+class RecordingAdapter:
+    """记录 (channel, content) 的适配器，用于断言分条语义。"""
+
+    def __init__(self, seen: list):
+        self.seen = seen
+
+    def deliver(self, channel, message) -> bool:
+        self.seen.append((channel, message.content))
+        return True
+
+
+def test_qq_channel_no_split(tmp_path):
+    """T-27 A：QQ 通道不分条——LLM 已按 QQ 协议短句分条，bus 层一条消息一次发送（限频一次计次）。"""
+    store = BusStore(str(tmp_path / "bus.db"))
+    ib = InputBus(store)
+    msg = ib.receive(source=MessageSource.QQ, content="你好")
+    ob = OutputBus(store)
+    long_content = "第一段内容\n第二段内容\n第三段内容"
+    ob.emit(OutboundMessage(id=msg.id, target=DeliveryChannel.QQ, content=long_content))
+    seen = []
+    Dispatcher(store, RecordingAdapter(seen)).dispatch(msg.id)
+    assert [c for _, c in seen] == [long_content]  # 完整内容一次投递，不分条
+
+
+def test_desktop_channel_splits_multiline(tmp_path):
+    """T-27 A：desktop 通道仍分条——多行内容按换行拆成多条独立消息。"""
+    store = BusStore(str(tmp_path / "bus.db"))
+    ib = InputBus(store)
+    msg = ib.receive(source=MessageSource.DESKTOP, content="你好")
+    ob = OutputBus(store)
+    ob.emit(OutboundMessage(id=msg.id, target=DeliveryChannel.DESKTOP, content="第一段\n第二段\n第三段"))
+    seen = []
+    Dispatcher(store, RecordingAdapter(seen)).dispatch(msg.id)
+    assert [c for _, c in seen] == ["第一段", "第二段", "第三段"]

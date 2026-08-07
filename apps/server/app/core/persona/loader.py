@@ -59,6 +59,11 @@ class PersonaConfig:
         return self._data.get("capabilities", {})
 
     @property
+    def nsfw(self) -> dict:
+        """NSFW 扩展（破甲提示词）— world_setting / trigger_and_style / vocabulary_table / role_boundary。"""
+        return self._data.get("nsfw", {})
+
+    @property
     def authors_note(self) -> dict:
         """Author's Note 尾部人设强锚点配置。"""
         return self._data.get("authors_note", {})

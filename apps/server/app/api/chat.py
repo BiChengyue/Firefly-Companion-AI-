@@ -570,6 +570,8 @@ async def chat_ws(ws: WebSocket):
             from app.core.voice.tts import get_tts_service
             import hashlib
             clean = _strip_emoji(text).strip()
+            # 剔除动作/神态段（*星号* 包裹）——动作不朗读，只读语言（2026-08-07）
+            clean = re.sub(r'\*[^*]*\*', '', clean)
             # 跳过省略号：省略号在 Edge-TTS 中产生犹豫停顿，跳过可避免不自然的顿挫语调
             clean = re.sub(r'…+', '', clean)
             if not clean:

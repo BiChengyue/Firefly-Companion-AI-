@@ -109,9 +109,11 @@ class Dispatcher:
         for target in sequence.targets:
             outbound = self._outbound_for(message_id, target)
             attempts = self._attempts(message_id)
-            # 拆条发送（2026-08-07 用户需求：消息分条，不要一大包——桌宠/QQ 都受益）
+            # 拆条发送（2026-08-07 用户需求：消息分条，不要一大包——桌宠受益）
             # 不分条：带 action（说做分离指令，必须整条一次执行）/ work 模式（萨姆专业语气）
-            if outbound.action or outbound.mode == "work":
+            # / QQ 通道（T-27 A：QQ 是兜底+限频限尺度通道，LLM 已按 QQ 协议短句分条，
+            #   bus 再分条会加倍消耗限频配额且与档位截断冲突；QQ 一条消息一次计次发送）
+            if outbound.action or outbound.mode == "work" or target == DeliveryChannel.QQ:
                 chunks = [outbound.content]
             else:
                 chunks = split_reply_chunks(outbound.content)

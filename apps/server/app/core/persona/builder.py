@@ -212,6 +212,19 @@ def build_system_prompt(
     if tone.get("characteristics"):
         parts.append("特点：" + "；".join(tone["characteristics"]))
 
+    # ===== NSFW 扩展（破甲提示词 — Porn_creater 适配流萤，2026-08-07）=====
+    nsfw = persona.nsfw
+    if nsfw:
+        _nsfw_parts = []
+        for k in ("world_setting", "trigger_and_style", "vocabulary_table", "role_boundary"):
+            v = (nsfw.get(k) or "").strip()
+            if v:
+                _nsfw_parts.append(v)
+        if _nsfw_parts:
+            parts.append(
+                "# 成人内容规则（NSFW 状态机 — 用户已授权）\n" + "\n\n".join(_nsfw_parts)
+            )
+
     # ===== 按模式注入 Agent 权限红线（firefly-skill 融合）=====
     if mode == "daily":
         if daily_unlocked:
