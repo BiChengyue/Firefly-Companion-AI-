@@ -203,6 +203,8 @@ const userAvatarChar = computed(() =>
 
 <template>
   <aside class="sidebar">
+    <!-- T-29 修复：滚动区（搜索+列表）与 footer 解耦——footer 固定底部，不被长列表挤出视口 -->
+    <div class="sidebar-scroll">
     <!-- 搜索 -->
     <div class="search-box">
       <span class="search-icon">🔍</span>
@@ -371,8 +373,10 @@ const userAvatarChar = computed(() =>
     <div v-if="companion.workspaces.length === 0 && !showWsAdd" class="empty-hint">
       暂无工作空间 — 点击＋添加目录
     </div>
+    </div>
+    <!-- /sidebar-scroll -->
 
-    <!-- 底部用户区 -->
+    <!-- 底部用户区（固定底部，不随列表滚动） -->
     <div class="sidebar-footer">
       <div class="user-profile" @click="handleOpenSettings" title="点击打开系统设置">
         <span class="user-avatar">{{ userAvatarChar }}</span>
@@ -393,11 +397,22 @@ const userAvatarChar = computed(() =>
   display: flex;
   flex-direction: column;
   height: 100%;
+  box-sizing: border-box;  /* T-29 修复：content-box 高度 100%+padding 溢出被父容器裁剪 */
   background: var(--bg-surface);
   border-right: 1px solid var(--border-main);
   padding: 16px 14px;
   gap: 10px;
+  /* overflow-y 移给 .sidebar-scroll（footer 固定底部，不与列表共滚） */
+}
+
+/* T-29 修复：滚动区（搜索+列表）独占剩余高度；footer 在滚动区外固定底部 */
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* ── 搜索 ──────────────────────────────────────── */
@@ -838,9 +853,11 @@ const userAvatarChar = computed(() =>
 
 /* ── 底部用户 ──────────────────────────────────── */
 .sidebar-footer {
-  margin-top: auto;
+  flex-shrink: 0;          /* 固定底部，不压缩 */
   padding-top: 10px;
+  padding-bottom: 10px;    /* 底部留白，避免贴窗口底边被裁 */
   border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
 }
 
 .user-profile {
