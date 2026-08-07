@@ -206,10 +206,10 @@ async def serve_voice_file(filename: str):
 
     async def _wait_file_stable(fp: Path) -> None:
         """等文件大小稳定（GPT-SoVITS 写入中 exists=True 但数据未写完——
-        立即返回会导致 206 截断/播放失败。生成约 5 秒，等稳定上限 15 秒覆盖）。"""
+        立即返回会导致 206 截断/播放失败。长段生成可达 20s+，上限 60s 兜底）。"""
         last_size = -1
         stable = 0
-        for _ in range(100):  # 最多等 ~15 秒（大小连续 3 次不变视为写完）
+        for _ in range(400):  # 最多等 ~60 秒（大小连续 3 次不变视为写完）
             try:
                 cur = fp.stat().st_size
             except OSError:

@@ -586,8 +586,9 @@ async def chat_ws(ws: WebSocket):
             provider = (live_settings.voice.tts.engine or "edge-tts").lower()
             voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
 
-            # 分条：与输出总线 split_reply_chunks 完全同规则（换行优先 + 标点 fallback
-            # 累积 ~20 字 + 上限 4 合并末段）——保证语音段与文字分条一一对应
+            # 分条：与输出总线 split_reply_chunks 同规则（换行优先 + 标点 fallback + 上限 4）
+            # 2026-08-07：fallback 累积阈值 20→12 字——段更短（GPT-SoVITS 单段合成快，
+            # 长段 18s+ 会拖长间隔且超文件稳定等待上限）
             segs = [ln.strip() for ln in re.split(r"\n+", clean) if ln.strip()]
             if len(segs) < 2:
                 sentences = [s.strip() for s in re.split(r"(?<=[。！？!?~])", clean) if s.strip()]
@@ -595,7 +596,7 @@ async def chat_ws(ws: WebSocket):
                     segs = []
                     cur = ""
                     for s in sentences:
-                        if cur and len(cur) + len(s) > 20 and len(segs) < 3:
+                        if cur and len(cur) + len(s) > 12 and len(segs) < 3:
                             segs.append(cur)
                             cur = s
                         else:
