@@ -496,7 +496,6 @@ async def chat_ws(ws: WebSocket):
                     logger.error("保存主动聊天消息失败: %s", e2)
             # 主动聊天不触发 TTS（避免反复拉起 GPT-SoVITS 子进程）
             return content
-            return content
 
         idle_engine.set_callback(_on_idle_trigger)
         idle_engine_future = asyncio.create_task(idle_engine.start())
@@ -752,20 +751,16 @@ async def chat_ws(ws: WebSocket):
                     # 里被调用）——server_status 改为「意图检测 + 直接注入」：用户问服务器状态时
                     # 真调工具拿数据塞进 system_prompt，LLM 据此如实转述（web_search 是名义工具，
                     # server_status 是真实现）。
+                    # T-29-A5：注入内容升级为「结构化数据 + 健康区间解读 + 服务影响 + few-shot +
+                    # 指令强化」（build_status_injection），修正流萤应答信息失真（数据模糊化）。
                     if mode == "daily" and re.search(r"服务器(?:状态|怎么样|咋样|正常|健康|情况|监控)", content):
                         try:
-                            from app.core.tools.builtin.server_status_tool import server_status as _server_status_fn
-                            _status = _server_status_fn()
-                            if _status.startswith("[ERROR]") or "监控暂不可用" in _status:
-                                system_prompt += (
-                                    "\n\n## 服务器状态（用户正在询问）\n"
-                                    "监控暂不可用（采集器未运行或状态文件缺失），如实告知用户暂查不到。"
-                                )
-                            else:
-                                system_prompt += (
-                                    "\n\n## 服务器状态（用户正在询问，如实转述，保持流萤口吻，不提及'工具/查询/数据'字眼）\n"
-                                    + _status
-                                )
+                            from app.core.tools.builtin.server_status_tool import build_status_injection as _build_inj
+                            system_prompt += (
+                                "\n\n## 服务器状态（用户正在询问，直接按以下数据回答，保持流萤口吻，"
+                                "不提及'工具/查询/数据'字眼）\n"
+                                + _build_inj()
+                            )
                         except Exception as _e_status:
                             logger.warning("[chat] server_status 注入失败: %s", _e_status)
 
