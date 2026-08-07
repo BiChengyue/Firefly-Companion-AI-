@@ -80,8 +80,9 @@ _launching = False  # 正在启动中，防止并发拉起
 
 # ── 空闲自动关闭机制 ──────────────────────────────────────────
 # GPT-SoVITS 常驻占大量内存（GPU ~2-3GB + CPU RAM ~1-2GB），
-# 日常对话并非每句都需要流萤原声，设置 5 分钟无使用自动释放。
-IDLE_SHUTDOWN_SECONDS = 300  # 5 minutes
+# 原设计 5 分钟无使用自动释放；2026-08-07 用户要求语音随时可用
+# （每次重新加载引擎需 ~1 分钟，实际不可接受）→ 改为 1 天（实际常驻）。
+IDLE_SHUTDOWN_SECONDS = 86400  # 1 day（实际常驻；服务器 3060 专用可承受）
 _idle_timer: Optional[threading.Timer] = None
 
 

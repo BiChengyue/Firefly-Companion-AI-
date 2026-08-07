@@ -133,7 +133,9 @@ class Dispatcher:
                     critical=outbound.critical,
                     action=outbound.action,
                     refId=outbound.refId,   # T-26 🟠5：chunk 透传 refId（主动消息↔回复关联）
-                    voice=outbound.voice,   # T-26 🟠5：chunk 透传 voice（语音推送契约字段）
+                    # voice 是「完整回复」的一条语音——只随第一条 chunk 播一次，
+                    # 后续 chunk 纯文字（否则分条 N 条会把同一语音播 N 遍，2026-08-07 修复）
+                    voice=outbound.voice if idx == 0 else None,
                     mode=outbound.mode,
                 )
                 try:
