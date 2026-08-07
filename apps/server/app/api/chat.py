@@ -576,8 +576,9 @@ async def chat_ws(ws: WebSocket):
             clean = _strip_emoji(text).strip()
             # 剔除动作/神态段（*星号* 包裹）——动作不朗读，只读语言（2026-08-07）
             clean = re.sub(r'\*[^*]*\*', '', clean)
-            # 跳过省略号：省略号在 Edge-TTS 中产生犹豫停顿，跳过可避免不自然的顿挫语调
-            clean = re.sub(r'…+', '', clean)
+            # 保留省略号（GPT-SoVITS 音素表映射停顿 SP——犹豫语气；Edge-TTS 时代才删除），
+            # 连续省略号归一为「……」避免超长无意义（2026-08-07）
+            clean = re.sub(r'…{2,}', '……', clean)
             if not clean:
                 return
             svc = get_tts_service()
