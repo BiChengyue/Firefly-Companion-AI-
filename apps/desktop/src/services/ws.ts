@@ -214,3 +214,11 @@ export class WsClient {
 }
 
 export const wsClient = new WsClient()  // 不传 URL：dynamicUrl=true，重连时重新 resolve（token 预载/设置变更生效）
+
+// HMR 热替换时断开旧连接：vite 每次重载本模块都会 new 一个 WsClient（新 WS 连接），
+// 旧连接无人关闭会持续收消息 → 同一内容重复显示 N 次（N=热载次数）。2026-08-07 修复。
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    wsClient.disconnect()
+  })
+}
