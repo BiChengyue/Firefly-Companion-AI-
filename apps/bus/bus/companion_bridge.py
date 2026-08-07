@@ -99,6 +99,8 @@ class CompanionBridge:
                 if workspace_path:  # 旧协议透传（T-17 🟠5）：companion Agent 分支据此切换工作目录
                     chat_msg["workspacePath"] = workspace_path
                 await ws.send(json.dumps(chat_msg))
+                # 每次生成独立：清掉上次残留的 voice_audio（避免 done 判断被污染）
+                self._last_voice = None
                 parts: list[str] = []
                 while True:
                     raw = await asyncio.wait_for(ws.recv(), timeout=self.timeout)
@@ -123,20 +125,23 @@ class CompanionBridge:
                         full = msg_data.get("content") or ""
                         # 记录生成模式（daily/work）——work 模式禁止分条（2026-08-07）
                         self._last_mode = msg_data.get("mode") or None
-                        # T-27：done 前未捕获 voice_audio（理论上 TTS 已启动），再等 1.5s 兜底；
-                        # done 前已捕获则不重置（避免丢弃）。
+                        # T-27：companion 的 _send_tts 是 create_task 异步推送——预连接 URL
+                        # 可能在 done 前或后到达。done 前未捕获则保持 WS 打开再等 3 秒
+                        # （提前关闭连接会 WebSocketDisconnect，语音彻底丢失）。
                         if self._last_voice is None:
                             try:
-                                raw2 = await asyncio.wait_for(ws.recv(), timeout=1.5)
-                                try:
-                                    m2 = json.loads(raw2)
-                                except json.JSONDecodeError:
-                                    m2 = None
-                                if m2 and m2.get("type") == "voice_audio":
-                                    self._last_voice = {
-                                        "audioUrl": m2.get("audioUrl"),
-                                        "text": m2.get("text"),
-                                    }
+                                for _ in range(3):
+                                    raw2 = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                                    try:
+                                        m2 = json.loads(raw2)
+                                    except json.JSONDecodeError:
+                                        m2 = None
+                                    if m2 and m2.get("type") == "voice_audio":
+                                        self._last_voice = {
+                                            "audioUrl": m2.get("audioUrl"),
+                                            "text": m2.get("text"),
+                                        }
+                                        break
                             except (asyncio.TimeoutError, websockets.ConnectionClosed):
                                 pass
                         if full:

@@ -274,4 +274,6 @@ def test_dispatch_chunk_passes_refid_voice(monkeypatch):
     d.dispatch("m2")
     assert len(received) == 2
     assert all(m.refId == "ref-123" for m in received)
-    assert all(m.voice is not None for m in received)
+    # voice 只随第一条 chunk（2026-08-07：同一完整语音不随分条播 N 遍）
+    assert received[0].voice is not None
+    assert all(m.voice is None for m in received[1:])
