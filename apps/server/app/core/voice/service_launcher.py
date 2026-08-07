@@ -468,7 +468,7 @@ def _on_idle_timeout():
 
 
 def stop_gpt_sovits_service():
-    """关闭后台拉起的 GPT-SoVITS 子进程"""
+    """关闭后台拉起的 GPT-SoVITS 子进程（仅本服务拉起的；外部 NSSM 引擎不碰，2026-08-07）"""
     global _process
     cancel_gpt_sovits_idle_timer()  # 先取消空闲计时器
     if _process is not None:
@@ -484,5 +484,5 @@ def stop_gpt_sovits_service():
         finally:
             _process = None
 
-    # 兜底强杀 9880 端口残存进程，确保无孤儿进程残留
-    kill_process_on_port(9880)
+        # 仅在自己拉起过进程时才兜底清理端口（避免误杀外部 NSSM 引擎 firefly-gsv）
+        kill_process_on_port(9880)
