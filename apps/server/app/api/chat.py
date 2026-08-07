@@ -564,29 +564,31 @@ async def chat_ws(ws: WebSocket):
         cleaned = re.sub(r'\n{2,}', '\n', cleaned)
         return cleaned.strip()
 
-    async def _send_tts(text: str):
-        """预连接优化：先推送音频 URL → 浏览器提前连接 → 再生成 TTS → 文件就绪即播。
+    async def _send_tts_urls(text: str):
+        """拆段 + 同步推送全部段 URL（done 前调用——bus 必捕获 voices；生成后台进行，2026-08-07）。
 
-        2026-08-07 分条语音：完整回复拆成段落逐条合成（与文字分条对应），
-        每段独立语音——短文本合成快、停顿自然、不切段拼接缺字。
+        预连接优化：先推 URL（桌宠预加载、voice.py 端点等文件就绪），
+        生成由 _generate_tts_audio 后台执行（避免 done 后 create_task 晚执行 → WebSocketDisconnect → voices=0）。
+        返回段列表（空 = 无语音）。
         """
         try:
-            from app.core.voice.tts import get_tts_service
             import hashlib
             clean = _strip_emoji(text).strip()
             # 剔除动作/神态段（*星号* 包裹）——动作不朗读，只读语言（2026-08-07）
-            clean = re.sub(r'\*[^*]*\*', '', clean)
+            clean = re.sub(r"\*[^*]*\*", "", clean)
             # 保留省略号（GPT-SoVITS 音素表映射停顿 SP——犹豫语气；Edge-TTS 时代才删除），
             # 连续省略号归一为「……」避免超长无意义（2026-08-07）
-            clean = re.sub(r'…{2,}', '……', clean)
+            clean = re.sub(r"…{2,}", "……", clean)
             if not clean:
-                return
-            svc = get_tts_service()
-
+                return []
             live_settings = get_settings()
             provider = (live_settings.voice.tts.engine or "edge-tts").lower()
-            voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
-
+            # T-28 审查 🟠：minimax 分支的 key 必须与 generate_speech_minimax 一致
+            # （minimax.voice_id），否则 URL 命中缓存 key 不一致 → 404。
+            if "minimax" in provider:
+                voice_id = live_settings.voice.minimax.voice_id or "female-shaonv"
+            else:
+                voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
             # 分条：与输出总线 split_reply_chunks 同规则（换行优先 + 标点 fallback + 上限 4）
             # 2026-08-07：fallback 累积阈值 20→12 字——段更短（GPT-SoVITS 单段合成快，
             # 长段 18s+ 会拖长间隔且超文件稳定等待上限）
@@ -608,21 +610,33 @@ async def chat_ws(ws: WebSocket):
                 segs = segs[:3] + ["".join(segs[3:])]
             if not segs:
                 segs = [clean]
-
-            # ① 先一次性推送所有段 URL——桌宠立即预加载全部（文件就绪即播），
-            #    生成流水线化：听段 1 时段 2 已在生成，段间几乎无缝（2026-08-07）
-            urls: list[str] = []
+            # 一次性推送所有段 URL——桌宠立即预加载全部（文件就绪即播），
+            # 生成流水线化：听段 1 时段 2 已在生成，段间几乎无缝（2026-08-07）
             for seg in segs:
                 cache_key = hashlib.md5(f"{provider}_{voice_id}_{seg}".encode("utf-8")).hexdigest()
                 audio_url = f"http://127.0.0.1:8765/api/voice/file/{cache_key}.wav"
-                urls.append(audio_url)
                 await _send_json(ws, {
                     "type": "voice_audio",
                     "audioUrl": audio_url,
                     "text": seg,
                 })
+            return segs
+        except Exception as e:
+            logger.error("TTS URL 推送失败: %s: %s", type(e).__name__, e)
+            return []
 
-            # ② 逐段生成（引擎单实例串行，物理限制；文件依次就绪，桌宠播完一段下一段已好）
+    async def _generate_tts_audio(segs: list):
+        """后台逐段生成（引擎单实例串行，物理限制；文件依次就绪，桌宠播完一段下一段已好）。"""
+        try:
+            from app.core.voice.tts import get_tts_service
+            svc = get_tts_service()
+            live_settings = get_settings()
+            provider = (live_settings.voice.tts.engine or "edge-tts").lower()
+            # T-28 审查 🟠：与 _send_tts_urls 保持同一 voice_id 选择逻辑（minimax 用 minimax.voice_id）
+            if "minimax" in provider:
+                voice_id = live_settings.voice.minimax.voice_id or "female-shaonv"
+            else:
+                voice_id = live_settings.voice.tts.voice or "zh-CN-XiaoyiNeural"
             for seg in segs:
                 await svc.generate_speech(seg, provider=provider, voice_id=voice_id)
                 logger.info("推送 TTS (%s/%s): %s...", provider, voice_id, seg[:20])
@@ -752,6 +766,8 @@ async def chat_ws(ws: WebSocket):
                     # 持久化用户消息
                     if current_session_id:
                         try:
+                            # T-28 排查：入库计数日志——确认「重复消息」是收到 2 次还是保存 2 次
+                            logger.info("[chat] SAVE_USER %.24s session=%s", content, current_session_id)
                             memory_manager.save_chat_message(current_session_id, "user", content, mode, None)
                         except Exception as e2:
                             logger.error("保存用户消息失败: %s", e2)
@@ -1026,6 +1042,12 @@ async def chat_ws(ws: WebSocket):
                             except Exception as e2:
                                 logger.error("保存Agent结果失败: %s", e2)
 
+                        # T-28 审查 🟠：URL 推送必须在 done 前（bus 捕获 voices 的窗口），
+                        # 与普通分支顺序统一——done 后推会依赖 bus 的 6 秒补收窗口。
+                        if voice_enabled and response_text.strip():
+                            _segs = await _send_tts_urls(response_text)
+                            if _segs:
+                                asyncio.create_task(_generate_tts_audio(_segs))
                         await _send_json(ws, {"type": "emotion", "label": emotion_label})
                         await _send_json(ws, {"type": "done", "message": {
                             "id": f"msg-{uuid.uuid4().hex[:8]}", "role": "assistant",
@@ -1033,8 +1055,6 @@ async def chat_ws(ws: WebSocket):
                             "meme": meme_url,
                             "createdAt": int(time.time() * 1000),
                         }})
-                        if voice_enabled and response_text.strip():
-                            asyncio.create_task(_send_tts(response_text))
                         _trigger_extraction_if_needed(
                             memory_manager, provider, history[-6:], mode, ws, source="agent"
                         )
@@ -1174,7 +1194,9 @@ async def chat_ws(ws: WebSocket):
                     # 文字已先到前端，TTS 在后台推理，用户感知延迟最小
                     # ═══════════════════════════════════════════════════════
                     if voice_enabled and response_text.strip():
-                        asyncio.create_task(_send_tts(response_text))
+                        _segs = await _send_tts_urls(response_text)
+                        if _segs:
+                            asyncio.create_task(_generate_tts_audio(_segs))
 
                     await _send_json(ws, {"type": "emotion", "label": emotion_label})
 

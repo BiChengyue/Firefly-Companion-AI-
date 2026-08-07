@@ -135,6 +135,8 @@ def make_desktop_handler(hub: DesktopHub, input_bus: InputBus, mode_switch_fn=No
                     if not content:
                         await queue.put({"type": "error", "message": "content required"})
                         continue
+                    # T-28 排查：入站 chat 计数日志——降 debug（内容含隐私，仅排查时开启）
+                    _log.debug("desktop chat inbound len=%d", len(content))
                     meta: dict = {}
                     if msg.get("sessionId"):
                         meta["sessionId"] = msg.get("sessionId")

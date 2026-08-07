@@ -223,18 +223,26 @@ class BusStore:
     # ── outbox ──
 
     def enqueue_outbound(self, message: OutboundMessage) -> None:
+        # T-28：voice_json 存 voices 列表（分条语音多段），旧单数 dict 兼容（读取时包成列表）。
+        # 只存 voice（单数）→ 段 2+ 在 outbox 持久化时丢失，投递只有段 1。
+        voices = [v.model_dump() for v in message.voices] if message.voices else (
+            [message.voice.model_dump()] if message.voice else []
+        )
+        # T-28 审查 🟠：INSERT OR REPLACE 会清空 delivered_chunks（T-26 重试跳过已送达
+        # chunk 的幂等）——重试路径重新 emit 时保留旧值，避免已送达段被重复推送。
+        old_chunks = self.get_delivered_chunks(message.id)
         conn = _get_conn(self._db_path)
         with _write_lock:
             conn.execute(
                 """INSERT OR REPLACE INTO outbox
-                   (id, message_id, target, content, voice_json, action_json, critical, ref_id, status, attempts, created_at, delivered_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id, message_id, target, content, voice_json, action_json, critical, ref_id, status, attempts, created_at, delivered_at, delivered_chunks)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     message.id,
                     message.id,
                     message.target.value,
                     message.content,
-                    json.dumps(message.voice.model_dump(), ensure_ascii=False) if message.voice else None,
+                    json.dumps(voices, ensure_ascii=False) if voices else None,
                     json.dumps(message.action.model_dump(), ensure_ascii=False) if message.action else None,
                     1 if message.critical else 0,
                     message.refId,
@@ -242,6 +250,7 @@ class BusStore:
                     0,
                     _now_ms(),
                     None,
+                    json.dumps(old_chunks, ensure_ascii=False) if old_chunks else None,
                 ),
             )
             conn.commit()
@@ -306,12 +315,21 @@ class BusStore:
 
     @staticmethod
     def _row_outbound(row) -> dict:
+        # T-28：voice_json 现为列表（多段）；兼容旧单数 dict。
+        raw_voice = json.loads(row[4]) if row[4] else None
+        if isinstance(raw_voice, dict):
+            voices = [raw_voice]
+        elif isinstance(raw_voice, list):
+            voices = raw_voice
+        else:
+            voices = []
         return {
             "id": row[0],
             "messageId": row[1],
             "target": row[2],
             "content": row[3],
-            "voice": json.loads(row[4]) if row[4] else None,
+            "voice": voices[0] if voices else None,
+            "voices": voices,
             "action": json.loads(row[5]) if row[5] else None,
             "critical": bool(row[6]),
             "refId": row[7],

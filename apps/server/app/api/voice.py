@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -192,9 +193,10 @@ async def serve_voice_file(filename: str):
     p = Path(filename)
     base_name = p.stem
 
-    # 安全检查：防止路径穿越
-    target_pattern_path = cache_dir / filename
-    if not str(target_pattern_path.resolve()).startswith(str(cache_dir.resolve())):
+    # 安全检查：防止路径穿越（T-28 审查 🟡：前缀比较改为边界精确——audio_cache_evil 不误通过）
+    cache_root = str(cache_dir.resolve())
+    resolved = str(target_pattern_path.resolve())
+    if resolved != cache_root and not resolved.startswith(cache_root + os.sep):
         raise HTTPException(status_code=403, detail="非法文件名")
 
     def find_actual_file() -> Optional[Path]:

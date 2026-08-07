@@ -115,6 +115,8 @@ function showTransition(line: string, toMode: 'daily' | 'work') {
 function playVoice(url: string, text: string) {
   // 语音队列（2026-08-07）：分条消息 N 条 voice_audio 几乎同时到达，
   // 原实现「新音频打断旧音频」→ 只听到最后一条——改为排队串行播放，逐条播完。
+  // T-28 排查日志：多段回复只播段 1 时，在 DevTools Console 看收到条数与每段结果。
+  console.log('[voice] playVoice queued, queue=', voiceQueue.length + 1, 'text=', (text || '').slice(0, 12))
   voiceQueue.push({ url, text })
   drainVoice()
 }
@@ -128,16 +130,31 @@ function drainVoice() {
   voicePlaying = true
   const audio = new Audio(url)
   currentAudio = audio
+  console.log('[voice] drainVoice start, remaining=', voiceQueue.length, 'url=', url.slice(-24))
+  // T-28 间隔优化：播放当前段时预热下一段（触发 voice.py 等文件就绪 + 浏览器缓存），
+  // 段间从「播完才请求→等生成」缩到「文件已就绪直接播」。
+  if (voiceQueue.length > 0) {
+    const next = voiceQueue[0]
+    const pre = new Audio(next.url)
+    pre.preload = 'auto'
+    pre.load()
+  }
   const finish = () => {
+    // T-28 幂等守卫：onerror 与 play().catch 可能对同一段双触发，settled 防止
+    // 同一段被 finish 两次 → 队列错乱（两段同时播 / 跳段）。
+    if (settled) return
+    settled = true
     voicePlaying = false
     currentAudio = null
     audio.onended = null
     audio.onerror = null
+    console.log('[voice] segment finished, remaining=', voiceQueue.length)
     drainVoice()
   }
+  let settled = false
   audio.onended = finish
-  audio.onerror = finish
-  audio.play().catch(finish)
+  audio.onerror = () => { console.warn('[voice] audio error:', url.slice(-24)); finish() }
+  audio.play().then(() => console.log('[voice] playing ok:', url.slice(-24))).catch(finish)
   try { emit('play-voice', { text }) } catch {}
   window.dispatchEvent(new CustomEvent('play-voice', { detail: { text } }))
 }

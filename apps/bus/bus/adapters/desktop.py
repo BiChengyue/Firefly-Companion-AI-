@@ -37,13 +37,17 @@ class DesktopAdapter:
         if message.refId:
             payload["refId"] = message.refId
         ok = self.hub.push(payload)
-        if ok and message.voice:
-            voice_payload = {"type": "voice_audio", "text": message.voice.text}
-            if message.voice.audioUrl:
-                voice_payload["audioUrl"] = message.voice.audioUrl
-            if message.voice.audioBase64:
-                voice_payload["audioBase64"] = message.voice.audioBase64
-            self.hub.push(voice_payload)
+        if ok and (message.voice or message.voices):
+            # T-28：分条语音——全部段都要推（原只推 message.voice 第一条
+            # → 多段回复只听到段 1）。voices 列表与文字分条顺序一致；无列表时回退单条。
+            voice_list = message.voices or ([message.voice] if message.voice else [])
+            for v in voice_list:
+                voice_payload = {"type": "voice_audio", "text": v.text}
+                if v.audioUrl:
+                    voice_payload["audioUrl"] = v.audioUrl
+                if v.audioBase64:
+                    voice_payload["audioBase64"] = v.audioBase64
+                self.hub.push(voice_payload)
         if ok and message.action:
             self.hub.push({
                 "type": "device_command",

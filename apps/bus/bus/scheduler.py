@@ -135,6 +135,9 @@ class Scheduler:
                 self._process(m)
             except Exception as e:
                 _log.warning("process message %s failed: %s", m["id"], e)
+                # 落定不重复计数（attempts 已在领取 pending→processing 时 +1，
+                # 3 次超限走死信）——重试会重新调 companion，永久故障时重复生成/重复入库，
+                # 但 NameError 类故障修复后不再重试；临时故障（服务重启）重试合理。
                 self.store.cas_inbound(m["id"], "processing", "failed", count_attempts=False)
             handled += 1  # 成功/失败均视为已处理（失败由死信/重试机制接管）
         return handled

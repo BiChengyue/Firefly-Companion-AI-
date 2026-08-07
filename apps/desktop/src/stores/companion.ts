@@ -52,10 +52,22 @@ export const useCompanionStore = defineStore('companion', () => {
   )
 
   // ── 阶段3：从后端加载会话历史 ──────────────────────────
+  /** T-28：后端历史按 (role, content, createdAt) 去重——修复重复入库导致的重启后
+   *  显示多条相同发送/相同回答（bus 双实例时代的旧脏数据 + 防御未来重复）。 */
+  function dedupeHistory<T extends { role?: unknown; content?: unknown; createdAt?: unknown }>(history: T[]): T[] {
+    const seen = new Set<string>()
+    return history.filter((h) => {
+      const key = `${String(h.role)}|${String(h.content)}|${String(h.createdAt)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
   async function loadSessionHistory(sessionId: string): Promise<ChatMessage[]> {
     try {
       const history = await api.getSessionHistory(sessionId, 50)
-      return history.map((h, i) => ({
+      return dedupeHistory(history).map((h, i) => ({
         // 优先用后端真实行 id（供"删除单条消息"使用），后端未返回时退回临时索引 id
         id: typeof h.id === 'number' && Number.isFinite(h.id) ? String(h.id) : `h-${sessionId}-${i}`,
         role: h.role as 'user' | 'assistant' | 'system',
@@ -181,7 +193,8 @@ export const useCompanionStore = defineStore('companion', () => {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const history = await api.getSessionHistory(sessionId, 50)
-        return history.map((h, i) => ({
+        // T-28 审查 🟠：与 loadSessionHistory 共用同一去重（初始化/恢复会话路径也要防重复显示）
+        return dedupeHistory(history).map((h, i) => ({
           // 用后端真实行 id（供"删除单条消息"删除数据库记录）；后端未返回时退回临时索引 id
           id: typeof h.id === 'number' && Number.isFinite(h.id) ? String(h.id) : `h-${sessionId}-${i}`,
           role: h.role as 'user' | 'assistant' | 'system',

@@ -41,7 +41,9 @@ def split_reply_chunks(text: str, max_chunks: int = 4) -> list[str]:
 
     优先级（用户指示：LLM 先行拆分，用回车隔开，输出总线按条发送）：
     1. 回复里已有换行分条（LLM 生成时按规则用空行/换行分隔）→ 按换行拆。
-    2. 无换行 → 按句末标点启发式拆（fallback），累积 ~20 字成条。
+    2. 无换行 → 按句末标点启发式拆（fallback），累积 ~12 字成条。
+    （T-28 审查 🟡：fallback 阈值与 companion _send_tts_urls 的语音拆段统一为 12，
+    否则无换行长回复时文字 chunk 与语音段数错位，尾段语音被丢弃。）
     最多 max_chunks 条；超出的剩余合并到末条（不丢内容）；短内容原样返回。
     """
     t = (text or "").strip()
@@ -53,14 +55,14 @@ def split_reply_chunks(text: str, max_chunks: int = 4) -> list[str]:
     if len(lines) >= 2:
         chunks = lines
     else:
-        # 2) fallback：按句末标点断句，累积 ~20 字成条
+        # 2) fallback：按句末标点断句，累积 ~12 字成条（与 companion 语音拆段一致）
         sentences = [s.strip() for s in re.split(r"(?<=[。！？!?~])", t) if s.strip()]
         if len(sentences) <= 1:
             return [t]
         chunks = []
         cur = ""
         for s in sentences:
-            if cur and len(cur) + len(s) > 20 and len(chunks) < max_chunks - 1:
+            if cur and len(cur) + len(s) > 12 and len(chunks) < max_chunks - 1:
                 chunks.append(cur)
                 cur = s
             else:
@@ -178,6 +180,7 @@ class Dispatcher:
             target=channel,  # 生成期目标是序列首通道；投递通道以当前级为准（可分离）
             content=row["content"],
             voice=row["voice"],
+            voices=row.get("voices") or [],  # T-28：多段语音列表透传（outbox 持久化恢复）
             critical=row["critical"],
             refId=row["refId"],
             action=row["action"],

@@ -326,6 +326,11 @@ class TTSService:
             "text_language": "zh",
             # 2026-08-07：整段一次合成（默认 cut5 按句切段再拼接，段间拼接会缺字）
             "text_split_method": "cut0",
+            # 2026-08-07 音质调优：默认 temperature=1/top_k=5 偏随机（语气飘、偶发口胡）；
+            # 0.8/3 稳定音色与停顿，减少段间风格跳跃（对速度影响可忽略）。
+            "temperature": 0.8,
+            "top_k": 3,
+            "top_p": 0.95,
         }
         if ref_audio_path:
             payload["ref_audio_path"] = ref_audio_path
