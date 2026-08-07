@@ -7,6 +7,8 @@
 import logging
 import os
 import re
+import subprocess
+import tempfile
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -203,6 +205,49 @@ def run_shell(command: str) -> str:
         return "[TIMEOUT] 命令超时（>30s）"
     except Exception as e:
         return f"[ERROR] 执行失败: {e}"
+
+
+@register_agent_tool(
+    name="ssh_exec",
+    description="在主电脑（Windows 桌面）上执行命令（SSH 远程，目标固定为主电脑 100.100.233.60）。用于打开应用、查文件、跑脚本等主电脑操作。参数 command: 要执行的命令文本（注意：在 Windows cmd 语义下执行，路径用反斜杠）",
+    risk_level="high",
+    parameters={
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "主电脑上要执行的命令"},
+        },
+        "required": ["command"],
+    },
+)
+def ssh_exec(command: str) -> str:
+    """主电脑远程执行（SSH 免密 + 文件句柄重定向，绕开 Windows ssh 匿名管道挂起问题）。
+
+    2026-08-08：Windows OpenSSH 客户端输出到匿名管道（subprocess capture_output）会挂起至超时；
+    输出到文件句柄则正常。故 stdout 写临时文件后读取。目标主机固定（天然白名单，防 ssh 到任意主机）。
+    """
+    host = "Fireflylover@100.100.233.60"
+    tmp = os.path.join(tempfile.gettempdir(), "ssh_exec_out.txt")
+    try:
+        with open(tmp, "w", encoding="utf-8", errors="replace") as f:
+            r = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, command],
+                stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=30,
+            )
+        try:
+            with open(tmp, "r", encoding="utf-8", errors="replace") as f:
+                output = f.read().strip()
+        except OSError:
+            output = ""
+        if not output:
+            output = "（无输出）"
+        if len(output) > 2048:
+            output = output[:2048] + "\n...(已截断)"
+        prefix = f"[RC={r.returncode}] " if r.returncode else ""
+        return prefix + output
+    except subprocess.TimeoutExpired:
+        return "[TIMEOUT] 主电脑命令超时（>30s）"
+    except Exception as e:
+        return f"[ERROR] 主电脑执行失败: {e}"
 
 
 @register_agent_tool(
