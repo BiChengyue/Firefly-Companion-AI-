@@ -36,7 +36,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ── LLM 设置 ───────────────────────────────────────
   const llmProvider = ref(loadStr('firefly_llm_provider', 'zhipu'))
-  const llmModel = ref(loadStr('firefly_llm_model', 'glm-4-plus'))
+  const llmModel = ref(loadStr('firefly_llm_model', 'deepseek-v4-flash'))
   const apiKey = ref(loadSensitive('firefly_api_key', ''))
   const llmBaseUrl = ref(loadStr('firefly_llm_base_url', ''))
   const llmMaxTokens = ref(loadNum('firefly_llm_max_tokens', 4096))

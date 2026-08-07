@@ -162,12 +162,19 @@ export function useSettingsForm() {
       dailyLimit: formProactiveChatDailyLimit.value,
     })
     try {
+      // llm.apiKey / baseUrl 为空时不提交（服务器保留原值）——防止桌宠默认空配置覆盖
+      // 服务器真实凭据（2026-08-07 修复：默认 glm-4-plus + 空 key 曾覆盖服务器 DeepSeek 配置）
+      const llmBody: Record<string, unknown> = {
+        provider: 'openai_compat',
+        model: config.llmModel,
+        maxTokens: config.llmMaxTokens,
+        temperature: config.llmTemperature,
+        enableThinking: config.llmEnableThinking,
+      }
+      if (config.apiKey) llmBody.apiKey = config.apiKey
+      if (config.llmBaseUrl) llmBody.baseUrl = config.llmBaseUrl
       await updateConfig({
-        llm: {
-          provider: 'openai_compat', model: config.llmModel, apiKey: config.apiKey,
-          baseUrl: config.llmBaseUrl, maxTokens: config.llmMaxTokens,
-          temperature: config.llmTemperature, enableThinking: config.llmEnableThinking,
-        },
+        llm: llmBody,
         voice: {
           provider: config.voiceProvider, voice_id: config.voiceId,
           gpt_sovits_url: config.gptSovitsUrl,
