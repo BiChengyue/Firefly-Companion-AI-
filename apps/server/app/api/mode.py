@@ -43,6 +43,21 @@ async def switch_mode(mode: str) -> dict:
         return {"error": "模式必须为 daily 或 work"}
 
     settings = get_settings()
+
+    # 2026-08-07：同步相同模式 → 幂等，跳过冷却、不提示（桌宠连接建立时自动同步模式，
+    # 同模式同步不该占冷却也不该弹「切换冷却中」）
+    if settings.mode.current == mode:
+        persona = load_persona()
+        mode_config = persona.get_mode_config(mode)
+        return {
+            "current": mode,
+            "theme": mode_config.get("theme", {}),
+            "hudVisible": mode_config.get("hud_visible", False),
+            "thinkVisible": mode_config.get("think_visible", False),
+            "proactiveCare": mode_config.get("proactive_care", False),
+            "synced": True,
+        }
+
     now = time.time() * 1000
     cooldown = settings.mode.switch_cooldown_ms
     if now - _last_switch_time < cooldown:
