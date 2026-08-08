@@ -26,6 +26,8 @@ const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
 const hoverSeg = ref<Seg | null>(null)
+const hoverTime = ref<number | null>(null) // hover 对应当天秒数（A：时间定位）
+const barEl = ref<HTMLElement | null>(null)
 let refreshVersion = 0
 
 const CAT_LABELS: Record<string, string> = {
@@ -94,12 +96,43 @@ const ringItems = computed(() => {
 })
 // 活动条（0:00 → 24:00 全长，未来时段黑色）
 const timeline = computed(() => {
-  const acts = state.value?.today_activities ?? []
+  const acts = (state.value?.today_activities ?? []).filter((s) => s.end > s.start) // 过滤零宽段（D）
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
   const start = t0.getTime() / 1000
   const end = start + 86400
   const now = Date.now() / 1000
-  return { acts, start, end, total: 86400, now }
+  // B：短段保底 2.5px，总宽超 98% 时等比压缩
+  const natural = acts.map((s) => ((s.end - s.start) / 86400) * 100)
+  const padded = natural.map((w) => Math.max(w, 2.5))
+  const sum = padded.reduce((a, b) => a + b, 0)
+  const scale = sum > 98 ? 98 / sum : 1
+  const widths = acts.map((_, i) => padded[i] * scale)
+  return { acts, start, end, total: 86400, now, widths }
+})
+// A：hover 时间定位——x 坐标 → 当天秒数 → 命中段
+function onBarMove(e: MouseEvent) {
+  const el = barEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  const sec = ratio * 86400
+  hoverTime.value = sec
+  const t = timeline.value.start + sec
+  hoverSeg.value = (timeline.value.acts.find((s) => t >= s.start && t < s.end)) ?? null
+}
+// A：hover 放大窗口（±30 分钟）内的段，供浮层渲染
+const hoverWindow = computed(() => {
+  if (hoverTime.value === null) return null
+  const sec = hoverTime.value
+  const winStart = Math.max(0, sec - 1800)
+  const winEnd = Math.min(86400, sec + 1800)
+  const segs = timeline.value.acts
+    .filter((s) => (s.start - timeline.value.start) < winEnd && (s.end - timeline.value.start) > winStart)
+    .map((s) => {
+      const w = ((Math.min(s.end, timeline.value.start + winEnd) - Math.max(s.start, timeline.value.start + winStart)) / (winEnd - winStart)) * 100
+      return { ...s, w: Math.max(w, 6) } // 每段 ≥6px
+    })
+  return { winStart, winEnd, segs }
 })
 
 function fmtMin(sec: number) {
@@ -110,9 +143,7 @@ function fmtMin(sec: number) {
 function fmtTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
-const hoverText = computed(() => {
-  const s = hoverSeg.value
-  if (!s) return ''
+function fmtSeg(s: Seg) {
   const dur = fmtMin(s.end - s.start)
   const base = `${CAT_LABELS[s.type] ?? s.type} ${fmtTime(s.start)}–${fmtTime(s.end)}（${dur}）`
   if (s.type === 'multi' && s.detail) {
@@ -123,7 +154,7 @@ const hoverText = computed(() => {
     return `${base}\n${parts.join(' · ')}`
   }
   return base
-})
+}
 
 async function refresh() {
   const myVersion = ++refreshVersion
@@ -197,20 +228,33 @@ onMounted(() => {
 
       <!-- ④ 本日活动条 -->
       <div class="timeline-wrap">
-        <div class="timeline" @mouseleave="hoverSeg = null">
+        <div ref="barEl" class="timeline" @mousemove="onBarMove" @mouseleave="hoverSeg = null; hoverTime = null">
           <div
             v-for="(s, i) in timeline.acts"
             :key="i"
             class="tseg"
             :class="s.type"
-            :style="{ width: Math.max(0.3, ((s.end - s.start) / timeline.total) * 100) + '%', background: CAT_COLORS[s.type] ?? '#888' }"
-            @mouseenter="hoverSeg = s"
+            :style="{ width: timeline.widths[i] + '%', background: CAT_COLORS[s.type] ?? '#888' }"
           />
           <!-- 未来时段（now → 24:00）黑色 -->
-          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: ((timeline.end - timeline.now) / timeline.total) * 100 + '%' }" />
+          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: Math.max(1.5, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
         </div>
         <div class="tlabel"><span>0:00</span><span>24:00</span></div>
-        <div v-if="hoverSeg" class="tooltip">{{ hoverText }}</div>
+
+        <!-- A：hover 放大浮层（±30 分钟窗，每段 ≥6px + 详情） -->
+        <div v-if="hoverWindow && hoverWindow.segs.length" class="zoom">
+          <div class="zoom-head">{{ fmtTime(timeline.start + hoverWindow.winStart) }}–{{ fmtTime(timeline.start + hoverWindow.winEnd) }}</div>
+          <div class="zoom-bar">
+            <div
+              v-for="(s, i) in hoverWindow.segs"
+              :key="i"
+              class="zseg"
+              :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+              :title="fmtSeg(s)"
+            />
+          </div>
+          <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : '（该时段无记录）' }}</div>
+        </div>
       </div>
 
       <div class="foot">
@@ -286,6 +330,15 @@ onMounted(() => {
   background: rgba(0, 0, 0, 0.85); color: #eee; font-size: 10px; padding: 4px 8px;
   border-radius: 6px; white-space: pre-line; line-height: 1.4;
 }
+/* A：hover 放大浮层（±30 分钟窗） */
+.zoom {
+  margin-top: 6px; background: var(--bg-surface, rgba(0, 0, 0, 0.4)); border: 1px solid var(--border-subtle);
+  border-radius: 6px; padding: 6px 8px;
+}
+.zoom-head { font-size: 10px; color: var(--text-tertiary); margin-bottom: 4px; font-family: 'Courier New', monospace; }
+.zoom-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: #222; }
+.zseg { height: 100%; min-width: 6px; }
+.zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
 
 .foot { margin-top: 8px; font-size: 9px; color: var(--text-muted); font-family: 'Courier New', monospace; }
 </style>
