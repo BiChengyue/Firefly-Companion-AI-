@@ -37,7 +37,7 @@ interface PhoneState {
   dnd?: boolean                               // 勿扰
   network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }
   loc_bucket?: 'home' | 'work' | 'out'        // 位置桶（低频）
-  track?: Array<{ t: number; lat: number; lng: number }>  // 当天轨迹（低频）
+  track?: Array<{ t: number; lat: number; lng: number; accuracy?: number }>  // 当天轨迹（低频）
   focus_app?: { name: string; cat: string } | null        // 当前应用
   screen_today_min?: number                   // 今日屏幕使用分钟
   volume_music?: number                       // 媒体音量（2026-08-08：App 上报，重做音量系统）
@@ -567,22 +567,33 @@ function initLeafletMap() {
   const el = trackMapEl.value
   const pts = phone.value?.track ?? []
   if (!el || pts.length < 1) return
+  // 2026-08-08：过滤漂移点——定位精度 >100m 的（纯基站/网络定位）丢弃；保留至少 2 点保证连线
+  const clean = pts.filter((p) => p.accuracy == null || p.accuracy <= 100)
+  const use = clean.length >= 2 ? clean : pts
   if (trackMap) {
     trackMap.remove()
     trackMap = null
   }
   // WGS-84 → GCJ-02：地图（高德）与轨迹点统一到火星坐标
   const toGcj = (lat: number, lng: number): [number, number] => wgs84ToGcj02(lat, lng)
-  const center: [number, number] = toGcj(pts[pts.length - 1].lat, pts[pts.length - 1].lng)
+  const center: [number, number] = toGcj(use[use.length - 1].lat, use[use.length - 1].lng)
   trackMap = L.map(el, { zoomControl: false, attributionControl: false }).setView(center, 14)
   L.tileLayer(
     'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
     { subdomains: ['1', '2', '3', '4'], maxZoom: 19 },
   ).addTo(trackMap)
-  const latlngs: Array<[number, number]> = pts.map((p) => toGcj(p.lat, p.lng))
+  const latlngs: Array<[number, number]> = use.map((p) => toGcj(p.lat, p.lng))
   L.polyline(latlngs, { color: '#06b6d4', weight: 3 }).addTo(trackMap)
   L.circleMarker(latlngs[0], { color: '#22c55e', radius: 5 }).addTo(trackMap)
   L.circleMarker(latlngs[latlngs.length - 1], { color: '#ef4444', radius: 5 }).addTo(trackMap)
+  // 2026-08-08：轨迹点 hover 显示精度（米）
+  const map = trackMap
+  use.forEach((p, i) => {
+    if (p.accuracy == null) return
+    L.circleMarker(latlngs[i], {
+      radius: 2, color: 'rgba(6,182,212,0.35)', fillOpacity: 0.4, interactive: false,
+    }).bindTooltip(`精度 ${Math.round(p.accuracy)}m`).addTo(map)
+  })
   L.control.zoom({ position: 'bottomright' }).addTo(trackMap)
   requestAnimationFrame(() => trackMap?.invalidateSize()) // 容器渲染后修正尺寸
 }
