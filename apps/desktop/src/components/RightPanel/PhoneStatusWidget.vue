@@ -314,17 +314,23 @@ function refresh() {
 
 // ── 2026-08-08：快捷面板——按钮走 Rust phone_command（无线 adb 直连手机）──
 const PHONE_ACTIONS = [
-  { key: 'ring_mode', icon: '🔔', label: '响铃', hint: '铃声音量拉满' },
-  { key: 'silent_mode', icon: '🔕', label: '静音', hint: '铃声音量归零' },
+  { key: 'sound_toggle', icon: '🔔', label: '声音', hint: '响铃/静音/震动循环' },
   { key: 'find_phone', icon: '📢', label: '找手机', hint: '音量拉满+播放铃声' },
   { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
   { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
+  { key: 'screenrecord', icon: '🎥', label: '录屏', hint: '录 15 秒存电脑' },
   { key: 'pull_files', icon: '📁', label: '文件', hint: '拉取 Download 到电脑' },
   { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
   { key: 'torch', icon: '🔦', label: '手电', hint: '需手机端 App', disabled: true },
 ]
+const soundState = ref<'ring' | 'silent' | 'vibrate'>('ring')
+const SOUND_META: Record<string, { icon: string; label: string }> = {
+  ring: { icon: '🔔', label: '响铃' },
+  silent: { icon: '🔕', label: '静音' },
+  vibrate: { icon: '📳', label: '震动' },
+}
 const busyKey = ref('')
 const actionMsg = ref('')
 const showTrack = ref(false)
@@ -339,7 +345,12 @@ async function runPhoneAction(a: { key: string; label: string; local?: boolean; 
   actionMsg.value = ''
   try {
     const res = await invoke<string>('phone_command', { action: a.key })
-    actionMsg.value = `${a.label} ✓ ${res}`
+    if (a.key === 'sound_toggle' && (res === 'ring' || res === 'silent' || res === 'vibrate')) {
+      soundState.value = res
+      actionMsg.value = `声音 ✓ 已切到${SOUND_META[res].label}`
+    } else {
+      actionMsg.value = `${a.label} ✓ ${res}`
+    }
   } catch (e) {
     actionMsg.value = `${a.label} ✗ ${e}`
   } finally {
@@ -363,12 +374,12 @@ const trackSvg = computed(() => {
   return { path, dots, w: W, h: H }
 })
 
-/** 打开地图链接（高德 URI，用最后一个轨迹点；无轨迹则空） */
+/** 打开地图链接（百度地图，用最后一个轨迹点；无轨迹则首页）——2026-08-08 改百度 */
 const trackMapUrl = computed(() => {
   const pts = phone.value?.track ?? []
   const last = pts[pts.length - 1]
-  if (!last) return 'https://uri.amap.com/marker'
-  return `https://uri.amap.com/marker?position=${last.lng},${last.lat}&name=手机当前位置`
+  if (!last) return 'https://map.baidu.com'
+  return `https://api.map.baidu.com/marker?location=${last.lat},${last.lng}&title=手机当前位置&output=html&src=firefly`
 })
 
 onMounted(() => {
@@ -418,8 +429,8 @@ onMounted(() => {
           :title="a.hint"
           @click="runPhoneAction(a)"
         >
-          <span class="qicon">{{ busyKey === a.key ? '⏳' : a.icon }}</span>
-          <span class="qlabel">{{ a.label }}</span>
+          <span class="qicon">{{ busyKey === a.key ? '⏳' : (a.key === 'sound_toggle' ? SOUND_META[soundState].icon : a.icon) }}</span>
+          <span class="qlabel">{{ a.key === 'sound_toggle' ? SOUND_META[soundState].label : a.label }}</span>
         </div>
       </div>
       <div v-if="actionMsg" class="qmsg">{{ actionMsg }}</div>

@@ -134,15 +134,28 @@ fn phone_command(action: String) -> Result<String, String> {
         run_cmd(&full)
     };
     match action.as_str() {
-        // 响铃模式：铃声音量拉满（不真响）
-        "ring_mode" => {
-            shell(&["settings", "put", "system", "volume_music", "15"])?;
-            shell(&["settings", "put", "system", "volume_ring", "15"])
-        }
-        // 静音模式：铃声音量归零
-        "silent_mode" => {
-            shell(&["settings", "put", "system", "volume_music", "0"])?;
-            shell(&["settings", "put", "system", "volume_ring", "0"])
+        // 声音三态循环：响铃 → 静音 → 震动 → 响铃（2026-08-08 合并为一键）
+        "sound_toggle" => {
+            let ring = shell(&["settings", "get", "system", "volume_ring"])?;
+            let vib = shell(&["settings", "get", "system", "vibrate_when_ringing"]).unwrap_or_default();
+            let ring_vol = ring.trim().parse::<i32>().unwrap_or(0);
+            let vib_on = vib.trim() == "1";
+            if ring_vol > 0 {
+                // 当前响铃 → 静音
+                shell(&["settings", "put", "system", "volume_ring", "0"])?;
+                shell(&["settings", "put", "system", "volume_music", "0"])?;
+                Ok("silent".into())
+            } else if vib_on {
+                // 当前震动 → 响铃
+                shell(&["settings", "put", "system", "vibrate_when_ringing", "0"])?;
+                shell(&["settings", "put", "system", "volume_ring", "15"])?;
+                shell(&["settings", "put", "system", "volume_music", "15"])?;
+                Ok("ring".into())
+            } else {
+                // 当前静音 → 震动
+                shell(&["settings", "put", "system", "vibrate_when_ringing", "1"])?;
+                Ok("vibrate".into())
+            }
         }
         // 找手机：音量拉满 + 播放预置铃声（findphone.mp3 需已 push 到 /sdcard/Download/）
         "find_phone" => {
@@ -183,6 +196,19 @@ fn phone_command(action: String) -> Result<String, String> {
                 return Err("截图失败".into());
             }
             Ok(format!("saved:{out_path}"))
+        }
+        // 录屏：screenrecord 15 秒 → pull 到电脑（2026-08-08）
+        "screenrecord" => {
+            let dir = r"C:\ProgramData\firefly-bot\records";
+            let _ = std::fs::create_dir_all(dir);
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            shell(&["screenrecord", "--time-limit", "15", "--bit-rate", "4000000", "/sdcard/record.mp4"])?;
+            let out = format!(r"{dir}\phone_{ts}.mp4");
+            run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "pull", "/sdcard/record.mp4", &out])?;
+            Ok(format!("saved:{out}"))
         }
         // 访问文件：pull /sdcard/Download 到电脑并打开资源管理器
         "pull_files" => {
