@@ -126,12 +126,17 @@ const hoverWindow = computed(() => {
   const sec = hoverTime.value
   const winStart = Math.max(0, sec - 1800)
   const winEnd = Math.min(86400, sec + 1800)
-  const segs = timeline.value.acts
+  let segs = timeline.value.acts
     .filter((s) => (s.start - timeline.value.start) < winEnd && (s.end - timeline.value.start) > winStart)
     .map((s) => {
       const w = ((Math.min(s.end, timeline.value.start + winEnd) - Math.max(s.start, timeline.value.start + winStart)) / (winEnd - winStart)) * 100
-      return { ...s, w: Math.max(w, 6) } // 每段 ≥6px
+      return { ...s, w }
     })
+  // 保底 6px，总宽超 100% 时等比压缩（保持与主条高亮窗内段的相对比例）
+  const padded = segs.map((s) => Math.max(s.w, 6))
+  const sum = padded.reduce((a, b) => a + b, 0)
+  const scale = sum > 100 ? 100 / sum : 1
+  segs = segs.map((s, i) => ({ ...s, w: padded[i] * scale }))
   return { winStart, winEnd, segs }
 })
 
