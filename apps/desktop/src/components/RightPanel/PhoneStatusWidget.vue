@@ -138,14 +138,43 @@ const resourceBars = computed(() => {
     // 电量三态 emoji：🔌有线充电 / ⚡无线充电 / 🔋未充电
     const emoji = !p.charging?.active ? '🔋' : (p.charging.method === 'wired' ? '🔌' : '⚡')
     bars.push({ label: `电量${emoji}`, pct: p.battery ?? 0 })
-    // 2026-08-08：重做音量系统——App 上报真实媒体音量（0-15），设置走 App AudioManager
-    if (p.volume_music != null) {
-      const v = Math.max(0, Math.min(15, p.volume_music))
-      bars.push({ label: `🔊 音量${v === 0 ? '🔇' : ''}`, pct: Math.round((v / 15) * 100) })
-    }
   }
   return bars
 })
+// ── 2026-08-08：音量条（可滑动 + emoji 一键静音/30%）——走 set_volume 广播 → App AudioManager ──
+const volumeSlider = ref(0)
+const volumeBusy = ref(false)
+const volumeLabel = computed(() => `音量${volumeSlider.value === 0 ? '🔇' : '🔊'}`)
+// App 上报校正（30s 刷新时同步滑块，避免本地值漂移）
+watch(
+  () => phone.value?.volume_music,
+  (v) => {
+    if (v != null && !volumeBusy.value) volumeSlider.value = Math.max(0, Math.min(15, v))
+  },
+)
+let volTimer: ReturnType<typeof setTimeout> | null = null
+async function sendVolume(v: number) {
+  volumeBusy.value = true
+  try {
+    await invoke('phone_command', { action: 'set_volume', stream: 'music', value: v })
+  } catch (e) {
+    actionMsg.value = `✗ 音量设置失败: ${e}`
+  } finally {
+    volumeBusy.value = false
+  }
+}
+// 滑块拖动：本地即时 + 停止 300ms 防抖后发送
+function onVolumeInput() {
+  if (volTimer) clearTimeout(volTimer)
+  volTimer = setTimeout(() => sendVolume(volumeSlider.value), 300)
+}
+// 点击 emoji：一键静音 ↔ 30%（15×30%≈5）
+async function toggleVolumeMute() {
+  const target = volumeSlider.value > 0 ? 0 : 5
+  volumeSlider.value = target
+  if (volTimer) clearTimeout(volTimer)
+  await sendVolume(target)
+}
 // 当前应用行（2026-08-08：数据源改 phone.focus_app）
 const procRows = computed(() => {
   const rows: Array<{ name: string; cat: string; focus: boolean }> = []
@@ -367,7 +396,7 @@ function refresh() {
 // ── 2026-08-08：快捷面板——按钮走 Rust phone_command（无线 adb 直连手机）──
 const PHONE_ACTIONS = [
   { key: 'sound_toggle', icon: '🔔', label: '声音', hint: '响铃/静音/震动循环' },
-  { key: 'find_phone', icon: '📢', label: '找手机', hint: '音量拉满+播放铃声' },
+  { key: 'find_phone', icon: '📢', label: '找手机', hint: '音量拉满+播放铃声', disabled: true },
   { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
   { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
@@ -376,7 +405,7 @@ const PHONE_ACTIONS = [
   { key: 'notify', icon: '🔔', label: '通知', hint: '手机通知转发（hub）', local: true },
   { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
-  { key: 'torch', icon: '🔦', label: '手电', hint: '需手机端 App', disabled: true },
+  { key: 'torch', icon: '🔦', label: '手电', hint: 'App 手电筒（CameraManager）' },
 ]
 const soundState = ref<'ring' | 'silent' | 'vibrate'>('ring')
 const SOUND_META: Record<string, { icon: string; label: string }> = {
@@ -582,6 +611,16 @@ watch(showFiles, (v) => {
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
           <span class="bar-val">{{ b.pct }}%</span>
         </div>
+        <!-- 2026-08-08：音量条——可滑动（300ms 防抖）+ 点击 emoji 一键静音/30% -->
+        <div v-if="phone?.volume_music != null" class="vol-row" :title="'音量 0-15，点击图标一键静音/30%'">
+          <span class="vol-emoji" @click="toggleVolumeMute">{{ volumeLabel }}</span>
+          <input
+            class="vol-slider"
+            type="range" min="0" max="15" step="1"
+            v-model.number="volumeSlider" @input="onVolumeInput"
+          />
+          <span class="vol-num">{{ volumeSlider }}</span>
+        </div>
       </div>
 
       <!-- ②b 快捷面板（2026-08-08：Rust phone_command 无线 adb 直连手机） -->
@@ -768,6 +807,12 @@ watch(showFiles, (v) => {
 
 .bars { margin: 0 0 8px; }
 .bar-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+/* 2026-08-08：音量条——可滑动 + emoji 点击一键静音/30% */
+.vol-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.vol-emoji { font-size: 10px; color: var(--text-secondary); cursor: pointer; user-select: none; flex: 0 0 auto; }
+.vol-emoji:hover { color: var(--text-primary); }
+.vol-slider { flex: 1; min-width: 0; height: 14px; accent-color: #22c55e; }
+.vol-num { width: 20px; text-align: right; font-size: 10px; color: var(--text-muted); font-family: 'Courier New', monospace; }
 .bar-label { width: 40px; font-size: 11px; color: var(--text-tertiary); }
 .bar { flex: 1; height: 6px; background: var(--border-subtle); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }

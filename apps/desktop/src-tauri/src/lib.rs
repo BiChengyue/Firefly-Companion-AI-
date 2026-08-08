@@ -125,7 +125,7 @@ fn run_cmd(args: &[&str]) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn phone_command(action: String) -> Result<String, String> {
+fn phone_command(action: String, stream: Option<String>, value: Option<i32>) -> Result<String, String> {
     // 先确保 adb 无线连接
     let _ = run_cmd(&[PHONE_ADB, "connect", PHONE_DEV]);
     let shell = |args: &[&str]| -> Result<String, String> {
@@ -145,24 +145,19 @@ fn phone_command(action: String) -> Result<String, String> {
             ])?;
             Ok("sound_toggle sent (App 三态循环)".into())
         }
-        // 找手机（2026-08-08 重做）：广播给 App —— App 播内置铃声（自拉音量 + 循环 + 通知可停 + 还原）。
-        // 已在响时 App 收到广播自动停止并还原（toggle 逻辑在 App 内，废弃华为音乐/按键/push/25s 线程）。
-        "find_phone" => {
-            shell(&[
-                "am", "broadcast", "-n", "com.firefly.phone/.ControlReceiver",
-                "-a", "com.firefly.phone.FIND_PHONE",
-            ])?;
-            Ok("find_phone sent (App 播放/停止)".into())
-        }
+        // 找手机（2026-08-08 暂时禁用——App 端逻辑保留，恢复时去掉前端 disabled 并还原此分支）
+        "find_phone" => Err("找手机已禁用（恢复中，稍后再试）".into()),
         "shizuku" => shell(&[
             "sh", "/storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh",
         ]),
-        // 勿扰开关（读当前 zen_mode 反写）
+        // 勿扰开关（2026-08-08：广播给 App —— NotificationManager 精确控制，与上报状态同源；
+        // 未授权「勿扰访问权限」时 App 会跳授权页）
         "dnd_toggle" => {
-            let cur = shell(&["settings", "get", "secure", "zen_mode"])?;
-            let next = if cur.trim() == "1" { "0" } else { "1" };
-            shell(&["settings", "put", "secure", "zen_mode", next])?;
-            Ok(if next == "1" { "dnd_on" } else { "dnd_off" }.into())
+            shell(&[
+                "am", "broadcast", "-n", "com.firefly.phone/.ControlReceiver",
+                "-a", "com.firefly.phone.DND_TOGGLE",
+            ])?;
+            Ok("dnd_toggle sent".into())
         }
         // 截图：screencap 存到 C:\ProgramData\firefly-bot\screenshots\
         "screenshot" => {
@@ -215,8 +210,26 @@ fn phone_command(action: String) -> Result<String, String> {
                 .map_err(|e| format!("scrcpy 启动失败: {e}"))?;
             Ok("scrcpy started".into())
         }
-        // 手电筒：华为无系统 torch 命令，需手机端 App/Shizuku 实现
-        "torch" => Err("华为无系统手电筒命令，需手机端 App 实现".into()),
+        // 手电筒（2026-08-08：广播给 App —— CameraManager.setTorchMode，华为无系统命令只能 App）
+        "torch" => {
+            shell(&[
+                "am", "broadcast", "-n", "com.firefly.phone/.ControlReceiver",
+                "-a", "com.firefly.phone.TORCH",
+            ])?;
+            Ok("torch sent".into())
+        }
+        // 音量设置（2026-08-08：音量滑动条/emoji 一键切换 → 广播 SET_VOLUME → App AudioManager 精确设置）
+        "set_volume" => {
+            let stream = stream.unwrap_or_else(|| "music".to_string());
+            let value = value.unwrap_or(0).clamp(0, 15);
+            shell(&[
+                "am", "broadcast", "-n", "com.firefly.phone/.ControlReceiver",
+                "-a", "com.firefly.phone.SET_VOLUME",
+                "--es", "stream", &stream,
+                "--ei", "value", &value.to_string(),
+            ])?;
+            Ok(format!("set_volume {stream}={value}"))
+        }
         _ => Err(format!("unknown action: {action}")),
     }
 }
