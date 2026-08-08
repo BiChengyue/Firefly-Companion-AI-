@@ -405,6 +405,7 @@ const userAvatarChar = computed(() =>
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;          /* 2026-08-08：grid item 默认 min-height:auto 会被内容撑开裁掉底部 → 滚动不到底 */
   box-sizing: border-box;  /* T-29 修复：content-box 高度 100%+padding 溢出被父容器裁剪 */
   background: var(--bg-surface);
   border-right: 1px solid var(--border-main);

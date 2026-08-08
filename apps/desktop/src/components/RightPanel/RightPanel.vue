@@ -30,6 +30,7 @@ const companion = useCompanionStore()
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;          /* 2026-08-08：grid item 默认 min-height:auto 被内容撑开裁掉底部 → 滚动不到底 */
   background: var(--bg-surface);
   border-left: 1px solid var(--border-main);
   padding: 16px 14px;

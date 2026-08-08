@@ -5,7 +5,7 @@ import { listen, emit } from '@tauri-apps/api/event'
 import { useCompanionStore } from '@/stores/companion'
 import { useSettingsStore } from '@/stores/settings'
 import { wsClient } from '@/services/ws'
-import { getMode, getCoreModelStatus, photoUrl } from '@/services/api'
+import { getMode, getCoreModelStatus, photoUrl, getApiBase } from '@/services/api'
 import { useCtrlOverride } from '@/composables/useCtrlOverride'
 import { useWsHandler } from '@/composables/useWsHandler'
 import ErrorBoundary from '@/components/Common/ErrorBoundary.vue'
@@ -116,11 +116,15 @@ function showTransition(line: string, toMode: 'daily' | 'work') {
 }
 
 function playVoice(url: string, text: string) {
+  // 2026-08-08：companion 生成 audioUrl 是服务器本机 http://127.0.0.1:8765/...
+  // 桌宠在主电脑访问自己的 127.0.0.1:8765 不通 → 改写为用户配置的 HTTP base（如 http://100.111.201.71:8765）
+  const base = getApiBase().replace(/\/$/, '')
+  const fixedUrl = base ? url.replace(/^http:\/\/127\.0\.0\.1:8765/, base) : url
   // 语音队列（2026-08-07）：分条消息 N 条 voice_audio 几乎同时到达，
   // 原实现「新音频打断旧音频」→ 只听到最后一条——改为排队串行播放，逐条播完。
   // T-28 排查日志：多段回复只播段 1 时，在 DevTools Console 看收到条数与每段结果。
   console.log('[voice] playVoice queued, queue=', voiceQueue.length + 1, 'text=', (text || '').slice(0, 12))
-  voiceQueue.push({ url, text })
+  voiceQueue.push({ url: fixedUrl, text })
   drainVoice()
 }
 
