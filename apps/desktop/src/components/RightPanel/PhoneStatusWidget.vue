@@ -1,29 +1,29 @@
 <script setup lang="ts">
 /**
- * 手机状态卡（v2 完整设计版）— 仿电脑状态卡：30s 采样上报（位置信息例外，低频）。
+ * 手机状态卡（v3 完整版）— 仿电脑状态卡：30s 采样上报（位置低频）。
+ * 接口留空：数据契约已定，接入 hub `GET /api/v1/phone-state` 后填 refresh() 即可。
  *
- * 数据契约（接口留空）：hub `GET /api/v1/phone-state`（与 sensor_context._fmt_phone 同构）。
- * 手机端 Android 客户端落地后，填 refresh() 里的接口赋值即可，卡片结构无需改动。
- *
- * 布局（仿电脑状态卡）：
+ * 布局（完全参考电脑状态卡）：
  *   ① 标题栏（红绿点 = 30s 心跳新鲜度）
  *   ② 前台 App（焦点 dot + 名称 + 分类）
- *   ③ 基础格区：电量(含充电) / 勿扰 / 网络 / 位置（位置低频上报，其余 30s）
- *   ④ 当日圆环 + 图例（今日 App 分类分布）
- *   ⑤ 本日活动条（主条 + 常显预览窗「最近 1 小时」）
+ *   ③ 基础格区：电量(含充电方式) / 勿扰(可开关) / 网络(含 WiFi 名) / 位置(点开地图+当天轨迹)
+ *   ④ 当日圆环 + 图例（今日 App 分类分布）——同电脑卡
+ *   ⑤ 本日活动条（主条 + 三态预览窗 AUTO/FOLLOW/LOCK）——同电脑卡
  *   ⑥ foot（更新时间）
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 /** 未来 hub /api/v1/phone-state 返回结构（接口暂留空，先定契约） */
 interface Seg { start: number; end: number; type: string; label?: string }
+interface TrackPt { t: number; lat: number; lng: number }
 interface PhoneState {
   last_at?: number                            // 最近一次 30s 心跳
   battery?: number                            // 电量 %
-  charging?: boolean                          // 充电中
-  dnd?: boolean                               // 勿扰
-  network?: 'wifi' | 'mobile' | 'offline'     // 网络
+  charging?: { active: boolean; method?: 'wired' | 'wireless' }  // 充电中 + 方式（有线/无线）
+  dnd?: boolean                               // 勿扰（电脑可开关）
+  network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }  // 网络 + WiFi 名称
   loc_bucket?: 'home' | 'work' | 'out'        // 位置桶（低频上报）
+  track?: TrackPt[]                           // 当天轨迹（低频上报；点开地图显示）
   focus_app?: { name: string; cat: string } | null   // 前台 App
   today_activities?: Seg[]                    // 今日活动段（仿电脑 sensor）
   today_categories?: Record<string, number>   // 今日分类时长秒（圆环）
@@ -32,6 +32,22 @@ interface PhoneState {
 const phone = ref<PhoneState | null>(null)   // 2026-08-08：接口未接，恒 null → 显示占位
 const error = ref('')
 const lastTs = ref(0)
+const loading = ref(false)
+
+/** 勿扰开关（本地 UI；未来调 bus 下发指令到手机） */
+const dndOverride = ref<boolean | null>(null)
+function toggleDnd() {
+  if (!phone.value) return
+  const cur = dndOverride.value ?? phone.value.dnd ?? false
+  dndOverride.value = !cur
+  // TODO(手机端接入后)：POST bus 下发 dnd 开关指令到手机端
+}
+
+/** 位置格点击 → 展开/收起当天轨迹面板 */
+const showTrack = ref(false)
+function toggleTrack() {
+  showTrack.value = !showTrack.value
+}
 
 /** 30s 上报 → 5 分钟无心跳视为离线（与电脑卡一致） */
 const stale = computed(() => {
@@ -58,17 +74,39 @@ const NET_LABELS: Record<string, string> = { wifi: 'Wi-Fi', mobile: '蜂窝', of
 const basics = computed(() => {
   const p = phone.value
   return [
-    { label: '电量', value: p?.battery != null ? `${p.battery}%${p.charging ? ' ⚡' : ''}` : '—' },
-    { label: '勿扰', value: p?.dnd != null ? (p.dnd ? '开启' : '关闭') : '—' },
-    { label: '网络', value: p?.network ? (NET_LABELS[p.network] ?? p.network) : '—' },
-    { label: '位置', value: p?.loc_bucket ? (LOC_LABELS[p.loc_bucket] ?? p.loc_bucket) : '—' },
+    {
+      label: '电量',
+      value: p?.battery != null
+        ? `${p.battery}%${p.charging?.active ? (p.charging.method === 'wireless' ? ' ⚡无线' : ' ⚡有线') : ''}`
+        : '—',
+      clickable: false,
+    },
+    {
+      label: '勿扰',
+      value: (dndOverride.value ?? p?.dnd) != null ? ((dndOverride.value ?? p?.dnd) ? '开启' : '关闭') : '—',
+      clickable: true,
+      toggle: true,
+    },
+    {
+      label: '网络',
+      value: p?.network
+        ? `${NET_LABELS[p.network.kind] ?? p.network.kind}${p.network.kind === 'wifi' && p.network.ssid ? `·${p.network.ssid}` : ''}`
+        : '—',
+      clickable: false,
+    },
+    {
+      label: '位置',
+      value: p?.loc_bucket ? (LOC_LABELS[p.loc_bucket] ?? p.loc_bucket) : '—',
+      clickable: true,
+      track: true,
+    },
   ]
 })
 
 /** 前台 App 行 */
 const focusRow = computed(() => phone.value?.focus_app ?? null)
 
-/** 当日圆环（仿电脑卡：今日分类聚合） */
+/** 当日圆环（同电脑卡） */
 const ringItems = computed(() => {
   const cats = phone.value?.today_categories
   if (!cats) return { items: [] as Array<{ k: string; pct: number }>, total: 0 }
@@ -87,55 +125,136 @@ const ringTotal = computed(() => {
   return { v: (total / 3600).toFixed(1), unit: '时' }
 })
 
-/** 活动条（仿电脑卡） */
+// ── 活动条（完全参考电脑卡：主条 + 三态预览窗）──
 const DAY_SEC = 86400
 const timeline = computed(() => {
   const acts = (phone.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
-  const start = (() => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    return d.getTime() / 1000
-  })()
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+  const start = t0.getTime() / 1000
   const end = start + DAY_SEC
   const now = Date.now() / 1000
-  const widths: number[] = []
-  for (const s of acts) {
-    const w = ((Math.min(s.end, now) - s.start) / DAY_SEC) * 100
-    widths.push(Math.max(0, w))
-  }
-  return { start, end, now, acts, widths }
+  const widths = acts.map((s) => ((s.end - s.start) / DAY_SEC) * 100)
+  return { acts, start, end, total: DAY_SEC, now, widths }
 })
 
-/** 预览窗：最近 1 小时（简化版，不做三态） */
+const hoverSeg = ref<Seg | null>(null)
+const barEl = ref<HTMLElement | null>(null)
+const winMode = ref<'auto' | 'follow' | 'lock'>('auto')
+const winCenter = ref<number | null>(null)
+let lastInteract = Date.now()
+const AUTO_IDLE_MS = 5 * 60 * 1000
+
+function onBarMove(e: MouseEvent) {
+  if (winMode.value === 'lock') return
+  lastInteract = Date.now()
+  const el = barEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  const sec = ratio * DAY_SEC
+  winMode.value = 'follow'
+  winCenter.value = sec
+  hoverSeg.value = findSegAt(sec)
+}
+function onBarClick(e: MouseEvent) {
+  lastInteract = Date.now()
+  if (winMode.value === 'lock') {
+    winMode.value = 'auto'
+    winCenter.value = null
+  } else {
+    const el = barEl.value
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+      winMode.value = 'lock'
+      winCenter.value = ratio * DAY_SEC
+      hoverSeg.value = findSegAt(winCenter.value)
+    }
+  }
+}
+function onBarLeave() {
+  if (winMode.value !== 'lock') {
+    winMode.value = 'auto'
+    winCenter.value = null
+  }
+  hoverSeg.value = null
+}
+function findSegAt(sec: number): Seg | null {
+  const t = timeline.value.start + sec
+  return timeline.value.acts.find((s) => t >= s.start && t < s.end) ?? null
+}
+
 const winWindow = computed(() => {
   const t = timeline.value
-  const end = Math.min(t.now, t.end)
-  const start = Math.max(t.start, end - 3600)
-  const segs = (phone.value?.today_activities ?? [])
-    .filter((s) => s.end > start && s.start < end && s.type !== 'offline')
-    .sort((a, b) => a.start - b.start)
+  const nowSec = t.now - t.start
+  let winStart: number, winEnd: number
+  if (winMode.value === 'auto' || winCenter.value === null) {
+    const lastAt = Math.min(nowSec, Math.max(0, (phone.value?.last_at ?? t.now) - t.start))
+    winEnd = lastAt
+    winStart = Math.max(0, winEnd - 3600)
+  } else {
+    winStart = Math.max(0, winCenter.value - 1800)
+    winEnd = Math.min(DAY_SEC, winCenter.value + 1800)
+  }
+  const segs = t.acts
+    .filter((s) => (s.start - t.start) < winEnd && (s.end - t.start) > winStart)
     .map((s) => {
-      const ss = Math.max(s.start, start)
-      const ee = Math.min(s.end, end)
-      return {
-        type: s.type,
-        w: ((ee - ss) / (end - start)) * 100,
-        label: s.label ?? '',
-      }
+      const w = ((Math.min(s.end, t.start + winEnd) - Math.max(s.start, t.start + winStart)) / (winEnd - winStart)) * 100
+      return { ...s, w }
     })
-  return { winStart: start - t.start, winEnd: end - t.start, segs }
+    .sort((a, b) => a.start - b.start)
+  const filled: typeof segs = []
+  for (const s of segs) {
+    const prev = filled[filled.length - 1]
+    if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
+      prev.end = s.start
+      prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
+    }
+    filled.push(s)
+  }
+  return { winStart, winEnd, segs: filled, mode: winMode.value }
 })
+
+function checkIdleAuto() {
+  if (Date.now() - lastInteract > AUTO_IDLE_MS && winMode.value !== 'auto') {
+    winMode.value = 'auto'
+    winCenter.value = null
+    hoverSeg.value = null
+  }
+}
 
 const winSummary = computed(() => {
   const segs = winWindow.value.segs
-  if (!segs.length) return '该时段无记录'
-  return segs.map((s) => `${CAT_LABELS[s.type] ?? s.type} ${s.w.toFixed(0)}%`).join(' · ')
+  if (!segs.length) return '（该时段无记录）'
+  const dur: Record<string, number> = {}
+  for (const s of segs) dur[s.type] = (dur[s.type] ?? 0) + (s.end - s.start)
+  const parts = Object.entries(dur)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k, v]) => `${CAT_LABELS[k] ?? k} ${Math.round(v / 60)} 分`)
+  return parts.join(' · ')
 })
 
-function fmtTime(sec: number): string {
-  const d = new Date(sec * 1000)
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+function fmtMin(sec: number) {
+  if (sec < 60) return `${Math.round(sec)} 秒`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分钟`
+  return `${Math.floor(sec / 3600)} 小时 ${Math.round((sec % 3600) / 60)} 分`
 }
+function fmtTime(ts: number) {
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+function fmtSeg(s: Seg) {
+  const dur = fmtMin(s.end - s.start)
+  return `${CAT_LABELS[s.type] ?? s.type} ${fmtTime(s.start)}–${fmtTime(s.end)}（${dur}）${s.label ? ` · ${s.label}` : ''}`
+}
+
+let idleTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  idleTimer = setInterval(checkIdleAuto, 30000)
+})
+onUnmounted(() => {
+  if (idleTimer) clearInterval(idleTimer)
+})
 
 function refresh() {
   // 2026-08-08：接口未接，留空；接入后 fetch hub /api/v1/phone-state 并写 phone/lastTs
@@ -149,7 +268,7 @@ function refresh() {
         <span class="dot" :class="phone && !stale ? 'up' : 'down'" title="手机在线状态（30s 心跳）" />
         <span class="title">📱 手机状态</span>
       </div>
-      <button class="refresh-btn" :disabled="!phone" title="刷新" @click="refresh">⟳</button>
+      <button class="refresh-btn" :disabled="loading || !phone" title="刷新" @click="refresh">⟳</button>
     </div>
 
     <div v-if="error" class="unavailable">{{ error }}</div>
@@ -167,13 +286,30 @@ function refresh() {
 
       <!-- ③ 基础格区 -->
       <div class="grid">
-        <div v-for="b in basics" :key="b.label" class="cell">
+        <div
+          v-for="b in basics"
+          :key="b.label"
+          class="cell"
+          :class="{ clickable: b.clickable }"
+          @click="b.toggle ? toggleDnd() : b.track ? toggleTrack() : null"
+        >
           <span class="c-label">{{ b.label }}</span>
-          <span class="c-val">{{ b.value }}</span>
+          <span class="c-right">
+            <span class="c-val">{{ b.value }}</span>
+            <span v-if="b.toggle" class="switch" :class="(dndOverride ?? phone.dnd) ? 'on' : 'off'">⌁</span>
+            <span v-else-if="b.track" class="track-btn">{{ showTrack ? '▲' : '📍' }}</span>
+          </span>
         </div>
       </div>
 
-      <!-- ④ 圆环 + 图例 -->
+      <!-- 位置：当天轨迹面板（接口留空；未来 track 数组画折线 + 打开地图） -->
+      <div v-if="showTrack" class="track-panel">
+        <div v-if="phone.track?.length" class="track-hint">轨迹 {{ phone.track.length }} 点（点击打开地图）</div>
+        <div v-else class="track-hint">暂无轨迹数据（手机端接入后显示当天轨迹）</div>
+        <!-- future: <svg> 按 track 经纬度画折线迷你地图；点击调 open(地图链接) </svg> -->
+      </div>
+
+      <!-- ④ 圆环 + 图例（同电脑卡） -->
       <div class="ring-block">
         <div class="ring" :style="ringItems.total ? { background: `conic-gradient(${ringItems.items.map((it, idx) => `${CAT_COLORS[it.k] ?? '#888'} ${idx === 0 ? 0 : ringItems.items.slice(0, idx).reduce((a, x) => a + x.pct, 0) * 100}% ${ringItems.items.slice(0, idx + 1).reduce((a, x) => a + x.pct, 0) * 100}%`).join(',')})` } : { background: '#333' }">
           <div class="ring-hole">{{ ringTotal.v }}<small>{{ ringTotal.unit }}</small></div>
@@ -188,44 +324,53 @@ function refresh() {
         </ul>
       </div>
 
-      <!-- ⑤ 活动条 + 预览窗 -->
+      <!-- ⑤ 活动条 + 三态预览窗（同电脑卡） -->
       <div class="timeline-wrap">
-        <div class="timeline">
+        <div ref="barEl" class="timeline" @mousemove="onBarMove" @click="onBarClick" @mouseleave="onBarLeave">
+          <div
+            class="hover-mask"
+            :style="{
+              left: (winWindow.winStart / timeline.total) * 100 + '%',
+              width: ((winWindow.winEnd - winWindow.winStart) / timeline.total) * 100 + '%',
+            }"
+          />
           <div
             v-for="(s, i) in timeline.acts"
             :key="i"
             class="tseg"
             :style="{
-              left: ((s.start - timeline.start) / DAY_SEC) * 100 + '%',
+              left: ((s.start - timeline.start) / timeline.total) * 100 + '%',
               width: timeline.widths[i] + '%',
               background: CAT_COLORS[s.type] ?? '#888',
             }"
           />
-          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ left: ((timeline.now - timeline.start) / DAY_SEC) * 100 + '%', width: Math.max(0.3, ((timeline.end - timeline.now) / DAY_SEC) * 100) + '%' }" />
+          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ left: ((timeline.now - timeline.start) / timeline.total) * 100 + '%', width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
         </div>
         <div class="tlabel"><span>0:00</span><span>24:00</span></div>
 
         <div class="zoom">
           <div class="zoom-head">
             <span>{{ fmtTime(timeline.start + winWindow.winStart) }}–{{ fmtTime(timeline.start + winWindow.winEnd) }}</span>
-            <span class="zoom-mode">最近 1 小时</span>
+            <span class="zoom-mode" :class="winWindow.mode">{{ winWindow.mode === 'auto' ? '最近 1 小时' : (winWindow.mode === 'lock' ? '已锁定' : '跟随') }}</span>
+            <button v-if="winWindow.mode !== 'auto'" class="zoom-back" title="回到最近 1 小时" @click="winMode = 'auto'; winCenter = null; hoverSeg = null">⟲</button>
           </div>
-          <div class="zoom-bar">
+          <div class="zoom-bar" @mouseleave="hoverSeg = null">
             <div
               v-for="(s, i) in winWindow.segs"
               :key="i"
               class="zseg"
               :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+              @mouseenter="hoverSeg = s"
             />
           </div>
-          <div class="zoom-detail">{{ winSummary }}</div>
+          <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
       </div>
     </template>
 
     <div v-else class="unavailable">
       手机端待接入
-      <div class="hint">接入后显示：前台 App / 电量 / 勿扰 / 网络 / 位置 / 今日分类 / 活动时间线</div>
+      <div class="hint">接入后显示：前台 App / 电量(有线·无线) / 勿扰(可开关) / 网络(WiFi名) / 位置(轨迹地图) / 今日分类 / 活动时间线</div>
     </div>
 
     <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }}</div>
@@ -319,20 +464,54 @@ function refresh() {
 .cell {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   background: var(--bg-surface, rgba(0, 0, 0, 0.2));
   border-radius: 6px;
   padding: 4px 8px;
 }
+.cell.clickable { cursor: pointer; }
+.cell.clickable:hover { background: var(--bg-surface, rgba(255, 255, 255, 0.06)); }
 .c-label {
   font-size: 10px;
   color: var(--text-muted);
+}
+.c-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 .c-val {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
   font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.switch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  border: 1px solid var(--border-main);
+  color: var(--text-muted);
+}
+.switch.on { background: #22c55e; border-color: #22c55e; color: #fff; }
+.switch.off { background: transparent; }
+.track-btn { font-size: 11px; }
+.track-panel {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.2));
+  border-radius: 6px;
+}
+.track-hint {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 .ring-block {
   display: flex;
@@ -396,6 +575,7 @@ function refresh() {
   border-radius: 3px;
   background: #333;
   overflow: hidden;
+  cursor: pointer;
 }
 .tseg {
   position: absolute;
@@ -403,6 +583,16 @@ function refresh() {
   height: 100%;
 }
 .tseg.future { background: #000 !important; }
+.hover-mask {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border: 1px solid #fff;
+  background: rgba(255, 255, 255, 0.12);
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 3px;
+}
 .tlabel {
   display: flex;
   justify-content: space-between;
@@ -426,6 +616,16 @@ function refresh() {
 .zoom-mode {
   font-size: 9px;
   color: var(--text-tertiary, var(--text-muted));
+}
+.zoom-mode.follow { color: var(--accent, #06b6d4); }
+.zoom-mode.lock { color: #eab308; }
+.zoom-back {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
 }
 .zoom-bar {
   display: flex;
