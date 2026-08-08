@@ -191,13 +191,13 @@ const winWindow = computed(() => {
     raw.push(s)
   }
   // 2026-08-08：绝对定位（与主条同机制）——flex width% 与主条 left% 解析基准不一致导致错位；累加 left
-  // 2026-08-08b：防御性强制按时间升序重排 + left 重算（防止任何来源的顺序异常导致副条左右翻转）
+  // 2026-08-08b：防御性强制按时间升序重排
+  // 2026-08-08d【真凶】：left 必须是「绝对位置」(s.start-winStart)/窗口宽——不是累加！
+  //   累加会把窗口开头的大段空隙（无数据灰区）挤到末尾 → 副条「先蓝后灰」与主条「先灰后蓝」翻转
   const sorted = [...raw].sort((a, b) => a.start - b.start)
-  let acc = 0
   const filled = sorted.map((s) => {
-    const o = { ...s, left: acc }
-    acc += o.w
-    return o
+    const left = Math.max(0, ((s.start - t.start - winStart) / (winEnd - winStart)) * 100)
+    return { ...s, left }
   })
   // 2026-08-08c：副条补画未来黑色段（winEnd 之后到 now 之间的部分主条为黑色——副条同样画黑，不再露灰背景）
   let futureLeft = 0

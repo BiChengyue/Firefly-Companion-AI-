@@ -245,15 +245,16 @@ const winWindow = computed(() => {
     })
     .sort((a, b) => a.start - b.start)
   const filled: Array<(typeof segs)[number] & { left: number }> = []
-  let acc = 0
-  for (const s of segs) {
+  const sorted = [...segs].sort((a, b) => a.start - b.start)
+  for (const s of sorted) {
     const prev = filled[filled.length - 1]
     if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
       prev.end = s.start
       prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
     }
-    filled.push({ ...s, left: acc })
-    acc += s.w
+    // left = 绝对位置（窗口开头空隙留白，不累加——否则空隙被挤到末尾翻转）
+    const left = Math.max(0, ((s.start - t.start - winStart) / (winEnd - winStart)) * 100)
+    filled.push({ ...s, left })
   }
   // 未来黑色段（与主条 future 一致）
   let futureLeft = 0
