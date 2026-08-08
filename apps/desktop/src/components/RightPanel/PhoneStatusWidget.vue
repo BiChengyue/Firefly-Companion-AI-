@@ -49,45 +49,8 @@ interface PhoneState {
 const state = ref<SensorState | null>(null)
 
 /** 2026-08-08：手机活动条数据源（MOCK）——接口未接，先用模拟手机活动段渲染；接入后 fill refresh() */
-function phoneMockActivities(): Seg[] {
-  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
-  const base = t0.getTime() / 1000
-  const now = Date.now() / 1000
-  const plan: Array<[number, number, string, string?]> = [
-    [8 * 3600, 8 * 3600 + 1500, 'social', '微信'],
-    [8 * 3600 + 1500, 9 * 3600 + 600, 'video', '哔哩哔哩'],
-    [10 * 3600, 11 * 3600, 'game', '云·星穹铁道'],
-    [11 * 3600, 12 * 3600, 'social', 'QQ'],
-    [12 * 3600, 13 * 3600, 'rest', undefined],
-    [13 * 3600, 14 * 3600 + 900, 'reading', '知乎'],
-    [15 * 3600, 16 * 3600, 'tool', '甲壳虫ADB'],
-    [16 * 3600, 17 * 3600, 'social', '微信'],
-  ]
-  return plan
-    .filter(([s]) => base + s < now)
-    .map(([s, e, t, l]) => ({ start: base + s, end: Math.min(base + e, now), type: t, ...(l ? { label: l } : {}) }))
-}
-const phone = ref<PhoneState | null>({
-  last_at: Date.now() / 1000,
-  battery: 87,
-  charging: { active: true, method: 'wireless' },
-  cpu_pct: 23,
-  ram_pct: 58,
-  storage_pct: 64,
-  dnd: true,
-  network: { kind: 'wifi', ssid: '我家WiFi' },
-  loc_bucket: 'home',
-  track: [
-    { t: Date.now() / 1000 - 8 * 3600, lat: 31.2304, lng: 121.4737 },
-    { t: Date.now() / 1000 - 7 * 3600, lat: 31.231, lng: 121.474 },
-    { t: Date.now() / 1000 - 6 * 3600, lat: 31.232, lng: 121.4745 },
-    { t: Date.now() / 1000 - 5 * 3600, lat: 31.233, lng: 121.475 },
-  ],
-  focus_app: { name: '微信', cat: 'social' },
-  screen_today_min: 156,
-  today_activities: phoneMockActivities(),
-  today_categories: { social: 7800, video: 4200, game: 3600, reading: 5400, rest: 3600, tool: 3600 },
-})
+// 2026-08-08：手机数据全部来自 hub（无 MOCK）——refresh 拉取后填充；拉取前显示空态
+const phone = ref<PhoneState | null>(null)
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
@@ -130,9 +93,11 @@ const sitting = computed(() => {
 // 占用条（手机卡）：CPU / 内存 / 磁盘 / 电量（2026-08-08 数据源全改 phone）
 const resourceBars = computed(() => {
   const p = phone.value
-  const bars: Array<{ label: string; pct: number }> = []
+  const bars: Array<{ label: string; pct: number; dash?: boolean }> = []
   if (p) {
-    bars.push({ label: 'CPU', pct: p.cpu_pct ?? 0 })
+    // 2026-08-08：CPU 需 Shizuku 提权采集——未授权时 App 不上报，显示「—」而非 0
+    if (p.cpu_pct != null) bars.push({ label: 'CPU', pct: p.cpu_pct })
+    else bars.push({ label: 'CPU', pct: 0, dash: true })
     bars.push({ label: '内存', pct: p.ram_pct ?? 0 })
     bars.push({ label: '磁盘', pct: p.storage_pct ?? 0 })
     // 电量三态 emoji：🔌有线充电 / ⚡无线充电 / 🔋未充电
@@ -366,7 +331,7 @@ function refresh() {
         volume_music: (st.raw as any)?.volume_music,
         volume_ring: (st.raw as any)?.volume_ring,
         charging: { active: !!r.charging, method: 'wireless' },
-        cpu_pct: undefined,
+        cpu_pct: r.cpu_pct ?? 0,
         ram_pct: r.ram_pct,
         storage_pct: r.storage_pct,
         dnd: !!r.dnd,
@@ -375,12 +340,12 @@ function refresh() {
           ssid: r.network?.ssid,
         },
         loc_bucket: undefined,
-        track: (tr?.track ?? []).map((p) => ({ t: p.at, lat: p.lat, lng: p.lng })),
-        focus_app: r.focus_app?.name ? { name: r.focus_app.name, cat: 'unknown' } : null,
+        track: (tr?.track ?? []).map((p) => ({ t: p.at, lat: p.lat, lng: p.lng, accuracy: p.accuracy })),
+        // 2026-08-08：hub 已透出分类后的 focus_app（{name,pkg,cat}）与真实使用段/聚合
+        focus_app: st.focus_app?.name ? { name: st.focus_app.name, cat: st.focus_app.cat ?? 'unknown' } : null,
         screen_today_min: r.screen_today_min,
-        // 活动段/分类暂无接口（App 后续上报），保留 MOCK 渲染
-        today_activities: phone.value?.today_activities ?? phoneMockActivities(),
-        today_categories: phone.value?.today_categories,
+        today_activities: (st.today_activities ?? []).filter((s) => s.start != null && s.end != null && s.type) as Seg[],
+        today_categories: st.today_categories ?? undefined,
       }
       lastTs.value = Date.now()
       error.value = ''
@@ -664,7 +629,7 @@ watch(showFiles, (v) => {
         <div v-for="b in resourceBars" :key="b.label" class="bar-row">
           <span class="bar-label">{{ b.label }}</span>
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
-          <span class="bar-val">{{ b.pct }}%</span>
+          <span class="bar-val">{{ b.dash ? '—' : b.pct + '%' }}</span>
         </div>
         <!-- 2026-08-08：音量条——可滑动（300ms 防抖）+ 点击 emoji 一键静音/30% -->
         <div v-if="phone?.volume_music != null" class="vol-row" :title="'音量 0-15，点击图标一键静音/30%'">

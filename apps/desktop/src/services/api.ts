@@ -134,6 +134,10 @@ export interface PhoneStateHub {
   screen?: string
   battery?: number
   received_at?: number
+  // 2026-08-08：hub 顶层透出（分类后）
+  focus_app?: { pkg?: string; name?: string; cat?: string }
+  today_activities?: Array<{ start?: number; end?: number; type?: string; label?: string }>
+  today_categories?: Record<string, number>
   raw?: {
     charging?: boolean
     network?: { kind?: string; ssid?: string }
@@ -141,6 +145,7 @@ export interface PhoneStateHub {
     focus_app?: { pkg?: string; name?: string }
     screen_today_min?: number
     storage_pct?: number
+    cpu_pct?: number
     ram_pct?: number
     bt_headset?: boolean
     lat?: number
@@ -154,6 +159,7 @@ export interface PhoneTrackPoint {
   lat: number
   lng: number
   battery?: number
+  accuracy?: number
 }
 
 /** 拉取手机最新状态（bus /api/v1/phone-state，只读）。失败抛错（调用方降级显示）。 */
