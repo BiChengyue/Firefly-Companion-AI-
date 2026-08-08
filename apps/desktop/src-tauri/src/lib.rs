@@ -251,25 +251,29 @@ fn phone_adb_shell(args: &[&str]) -> Result<String, String> {
 
 #[tauri::command]
 fn phone_fs_list(path: String) -> Result<Vec<PhoneFsEntry>, String> {
-    let out = phone_adb_shell(&["ls", "-la", &path])?;
+    // /sdcard 是符号链接，加尾部斜杠展开目录内容
+    let p = if path.ends_with('/') {
+        path.clone()
+    } else {
+        format!("{path}/")
+    };
+    let out = phone_adb_shell(&["ls", "-la", &p])?;
     let mut entries = Vec::new();
     for line in out.lines().skip(1) {
-        // drwxrwxrwx owner group size date name...
-        let mut it = line.split_whitespace();
-        let perms = it.next().unwrap_or("");
-        it.next(); // owner
-        it.next(); // group
-        let size = it.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
-        it.next(); // month
-        it.next(); // day
-        it.next(); // time
-        let name = it.collect::<Vec<_>>().join(" ");
+        // Android toybox ls：perms links owner group size date time name
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 8 {
+            continue;
+        }
+        let perms = fields[0];
+        let size = fields[4].parse::<u64>().unwrap_or(0);
+        let name = fields[7..].join(" ");
         if name.is_empty() || name == "." || name == ".." {
             continue;
         }
         entries.push(PhoneFsEntry {
             name,
-            dir: perms.starts_with('d'),
+            dir: perms.starts_with('d') || perms.starts_with('l'),
             size,
         });
     }
