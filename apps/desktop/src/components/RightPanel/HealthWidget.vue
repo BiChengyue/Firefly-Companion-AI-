@@ -238,6 +238,8 @@ const yTicksLg = computed(() => {
 // ── hover：显示当天全部数据（原始值，缺失标 —，不用旧值/默认值）──
 const hoverIdx = ref(-1)
 const hoverIdxLg = ref(-1)
+/** 2026-08-08：小图悬浮窗跟随 hover 点（像素位置，相对 chart-wrap） */
+const hoverPos = ref<{ x: number; y: number } | null>(null)
 /** 2026-08-08：大图悬浮窗跟随鼠标（像素位置，相对 SVG 容器） */
 const hoverPosLg = ref<{ x: number; y: number } | null>(null)
 const hoverPoint = computed(() => (hoverIdx.value >= 0 && hoverIdx.value < trendPts.value.length ? trendPts.value[hoverIdx.value] : null))
@@ -299,6 +301,14 @@ function onSvgMove(e: MouseEvent) {
   })
   hoverIdx.value = best
   hoverIdxLg.value = -1
+  // 悬浮窗跟随 hover 点（preserveAspectRatio=none → 线性换算到容器像素）；clamp 防溢出
+  if (best >= 0) {
+    const p = trendPts.value[best]
+    hoverPos.value = {
+      x: Math.min(Math.max((p.x / SVG_W) * rect.width, 55), rect.width - 55),
+      y: (p.y / SVG_H) * rect.height,
+    }
+  }
 }
 
 /** 大图鼠标移动 */
@@ -362,7 +372,7 @@ function onSvgMoveLg(e: MouseEvent) {
               :viewBox="`0 0 ${SVG_W} ${SVG_H}`"
               preserveAspectRatio="none"
               @mousemove="onSvgMove"
-              @mouseleave="hoverIdx = -1"
+              @mouseleave="hoverIdx = -1; hoverPos = null"
             >
               <defs>
                 <!-- 2026-08-08：趋势彩色化——每段折线独立渐变（起点色→终点色过渡），面积渐变 -->
@@ -408,8 +418,12 @@ function onSvgMoveLg(e: MouseEvent) {
               />
             </svg>
             <div v-else class="trend-empty">暂无数据</div>
-            <!-- 2026-08-08：大图展开时移除小图悬浮显示（避免遮挡/与点重叠）；只显示单指标值 -->
-            <div v-if="!showTrendLarge && hoverSmall" class="chart-tip">
+            <!-- 2026-08-08：大图展开时移除小图悬浮显示；跟随 hover 点、点上方居中，不固定位置 -->
+            <div
+              v-if="!showTrendLarge && hoverSmall && hoverPos"
+              class="chart-tip"
+              :style="{ left: hoverPos.x + 'px', top: hoverPos.y + 'px' }"
+            >
               <div class="tip-date">{{ hoverSmall.date }}</div>
               <div class="tip-row">
                 <span class="tip-k">{{ hoverSmall.label }}</span>
@@ -652,17 +666,16 @@ function onSvgMoveLg(e: MouseEvent) {
   pointer-events: none;
 }
 .chart-tip {
-  position: absolute;
-  top: -2px;
-  right: 0;
+  position: absolute;      /* 2026-08-08：跟随 hover 点（left/top 由 onSvgMove 写入） */
+  transform: translate(-50%, calc(-100% - 6px));  /* 点正上方居中 */
   background: var(--bg-elevated, rgba(20, 20, 24, 0.95));
   border: 1px solid var(--border-main);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   font-size: 10px;
   line-height: 1.5;
   z-index: 5;
-  min-width: 120px;
+  min-width: 110px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   pointer-events: none;   /* 2026-08-08：不拦截鼠标——修复悬浮窗与数据点重叠导致 hover 无高亮 */
 }
