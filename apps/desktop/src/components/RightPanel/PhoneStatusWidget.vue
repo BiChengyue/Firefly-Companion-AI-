@@ -395,6 +395,23 @@ const mapView = ref({ z: 14, x: 0, y: 0 })
 let mapDrag = false
 let mapDragStart = { x: 0, y: 0, vx: 0, vy: 0 }
 let mapRenderQueued = false
+/** 2026-08-08c：瓦片内存缓存——拖动/缩放时同 URL 瓦片不重复网络加载，消除闪烁 */
+const tileCache = new Map<string, HTMLImageElement>()
+
+function getTile(url: string, cb: (img: HTMLImageElement) => void) {
+  const hit = tileCache.get(url)
+  if (hit) {
+    cb(hit)
+    return
+  }
+  const img = new Image()
+  img.onload = () => {
+    tileCache.set(url, img)
+    cb(img)
+  }
+  img.onerror = () => cb(img) // 失败也回调（空图），避免 pending 计数卡死轨迹不画
+  img.src = url
+}
 
 function initMapView() {
   const pts = phone.value?.track ?? []
@@ -456,10 +473,8 @@ function renderMap() {
   }
   for (let dx = -span; dx <= span; dx++) {
     for (let dy = -span; dy <= span; dy++) {
-      const img = new Image()
-      img.onload = () => onLoaded(img, dx, dy)
       pending++
-      img.src = tileUrl(tx0 + dx, ty0 + dy, z)
+      getTile(tileUrl(tx0 + dx, ty0 + dy, z), (img) => onLoaded(img, dx, dy))
     }
   }
   if (pending === 0) drawTrackLayer(ctx, z, x, y)
