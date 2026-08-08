@@ -268,6 +268,24 @@ const hoverDetail = computed(() => {
   }
 })
 
+/** 2026-08-08：小图悬浮窗——只显示 hover 点对应的当前所选指标单值（大图才全展示） */
+const hoverSmall = computed(() => {
+  const p = hoverPoint.value
+  if (!p || !p.rawDay) return null
+  const d = p.rawDay
+  const m = metric.value
+  const v = m.pick(d)
+  let text = '—'
+  if (v != null) {
+    if (m === METRICS.sleepSecs) text = fmtHm(v)
+    else if (m === METRICS.weight) text = `${v.toFixed(1)} kg`
+    else if (m === METRICS.restingHr) text = `${v} bpm`
+    else if (m === METRICS.steps) text = Number(v).toLocaleString()
+    else text = String(v)
+  }
+  return { date: d.date, label: m.label, text }
+})
+
 /** SVG 鼠标移动 → 换算 viewBox 坐标 → 找最近数据点（小图） */
 function onSvgMove(e: MouseEvent) {
   const svg = e.currentTarget as SVGSVGElement
@@ -390,12 +408,12 @@ function onSvgMoveLg(e: MouseEvent) {
               />
             </svg>
             <div v-else class="trend-empty">暂无数据</div>
-            <!-- 2026-08-08：大图展开时移除小图悬浮显示（避免遮挡/与点重叠） -->
-            <div v-if="!showTrendLarge && hoverDetail" class="chart-tip">
-              <div class="tip-date">{{ hoverDetail.date }}</div>
-              <div v-for="(r, ri) in hoverDetail.rows" :key="ri" class="tip-row">
-                <span class="tip-k">{{ r[0] }}</span>
-                <span class="tip-v">{{ r[1] }}</span>
+            <!-- 2026-08-08：大图展开时移除小图悬浮显示（避免遮挡/与点重叠）；只显示单指标值 -->
+            <div v-if="!showTrendLarge && hoverSmall" class="chart-tip">
+              <div class="tip-date">{{ hoverSmall.date }}</div>
+              <div class="tip-row">
+                <span class="tip-k">{{ hoverSmall.label }}</span>
+                <span class="tip-v">{{ hoverSmall.text }}</span>
               </div>
             </div>
           </div>
