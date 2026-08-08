@@ -321,8 +321,10 @@ function refresh() {
     getPhoneState(),
     getPhoneTrack(24, 200).catch(() => null),
     getPhoneNotifies(10).catch(() => null),
+    // 2026-08-08：CPU 兜底——Shizuku 授权被华为拦截时，桌宠 Rust 用 adb 直接读 /proc/stat
+    invoke<string>('phone_command', { action: 'cpu' }).catch(() => null),
   ])
-    .then(([st, tr, nt]) => {
+    .then(([st, tr, nt, rustCpu]) => {
       if (nt?.notifies) phoneNotifies.value = nt.notifies
       const r = st.raw ?? {}
       phone.value = {
@@ -331,7 +333,7 @@ function refresh() {
         volume_music: (st.raw as any)?.volume_music,
         volume_ring: (st.raw as any)?.volume_ring,
         charging: { active: !!r.charging, method: 'wireless' },
-        cpu_pct: r.cpu_pct ?? 0,
+        cpu_pct: r.cpu_pct ?? (rustCpu ? Number(rustCpu) : undefined),
         ram_pct: r.ram_pct,
         storage_pct: r.storage_pct,
         dnd: !!r.dnd,

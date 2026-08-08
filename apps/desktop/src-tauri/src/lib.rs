@@ -227,6 +227,32 @@ fn phone_command(action: String, stream: Option<String>, value: Option<i32>) -> 
             ])?;
             Ok("torch sent".into())
         }
+        // CPU 占用（2026-08-08：adb shell 身份读 /proc/stat 两次采样——Shizuku 授权被华为拦截前的兜底）
+        "cpu" => {
+            let parse = |s: &str| -> Option<(u64, u64)> {
+                let parts: Vec<&str> = s.split_whitespace().collect();
+                if parts.len() < 5 || parts[0] != "cpu" {
+                    return None;
+                }
+                let nums: Vec<u64> = parts[1..].iter().filter_map(|x| x.parse().ok()).collect();
+                let total: u64 = nums.iter().sum();
+                let idle = nums.get(3).copied().unwrap_or(0) + nums.get(4).copied().unwrap_or(0);
+                Some((total, idle))
+            };
+            let line_of = |out: &str| out.lines().find(|l| l.starts_with("cpu ")).unwrap_or("").to_string();
+            let f1 = parse(&line_of(&shell(&["cat", "/proc/stat"])?)).ok_or("cpu read fail")?;
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let f2 = parse(&line_of(&shell(&["cat", "/proc/stat"])?)).ok_or("cpu read fail")?;
+            let (t1, i1) = f1;
+            let (t2, i2) = f2;
+            let dt = t2.saturating_sub(t1);
+            let di = i2.saturating_sub(i1);
+            if dt == 0 {
+                return Ok("0".into());
+            }
+            let pct = ((dt - di) * 100 / dt).min(100);
+            Ok(format!("{pct}"))
+        }
         // 音量设置（2026-08-08：音量滑动条/emoji 一键切换 → 广播 SET_VOLUME → App AudioManager 精确设置）
         "set_volume" => {
             let stream = stream.unwrap_or_else(|| "music".to_string());
