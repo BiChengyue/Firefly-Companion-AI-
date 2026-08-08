@@ -403,16 +403,20 @@ interface PhoneAction {
   disabled?: boolean
 }
 const PHONE_ACTIONS: PhoneAction[] = [
+  // ── 手机控制（App 驱动：AudioManager/NotificationManager/CameraManager）──
   { key: 'sound_toggle', icon: '🔔', label: '声音', hint: '响铃/静音/震动循环' },
-  { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
   { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
+  { key: 'torch', icon: '🔦', label: '手电', hint: 'App 手电筒（CameraManager）' },
+  // ── 屏幕捕获（adb）──
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
   { key: 'screenrecord', icon: '🎥', label: '录屏', hint: '录 15 秒存电脑' },
+  { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
+  // ── 数据查看（前端直连 hub）──
   { key: 'pull_files', icon: '📁', label: '文件', hint: '电脑端浏览手机文件（拖拽传输）', local: true },
   { key: 'notify', icon: '💬', label: '通知', hint: '手机通知转发（hub）', local: true },
-  { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
-  { key: 'torch', icon: '🔦', label: '手电', hint: 'App 手电筒（CameraManager）' },
+  // ── 系统工具 ──
+  { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
 ]
 const soundState = ref<'ring' | 'silent' | 'vibrate'>('ring')
 const SOUND_META: Record<string, { icon: string; label: string }> = {
