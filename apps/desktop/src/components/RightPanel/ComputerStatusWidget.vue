@@ -329,9 +329,7 @@ onMounted(() => {
             <span class="zoom-mode" :class="winWindow.mode">{{ winWindow.mode === 'auto' ? '最近 1 小时' : (winWindow.mode === 'lock' ? '已锁定' : '跟随') }}</span>
             <button v-if="winWindow.mode !== 'auto'" class="zoom-back" title="回到最近 1 小时" @click="winMode = 'auto'; winCenter = null; hoverSeg = null">⟲</button>
           </div>
-          <div class="zoom-bar">
-            <!-- 底段：窗口内无记录的空隙显示灰（offline 也归入空隙） -->
-            <div class="zseg gap" style="width: 100%; background: #3a3a3a" @mouseenter="hoverSeg = null" />
+          <div class="zoom-bar" @mouseleave="hoverSeg = null">
             <div
               v-for="(s, i) in winWindow.segs"
               :key="i"
@@ -340,7 +338,6 @@ onMounted(() => {
               @mouseenter="hoverSeg = s"
               @mouseleave="hoverSeg = null"
             />
-            <div v-if="!winWindow.segs.length" class="zseg empty" style="width: 100%; background: #222" />
           </div>
           <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
@@ -436,8 +433,8 @@ onMounted(() => {
 .zoom-mode.lock { color: #c07a1f; border-color: #c07a1f; }
 .zoom-back { margin-left: auto; border: 1px solid var(--border-subtle); background: none; color: var(--text-muted); border-radius: 4px; font-size: 10px; cursor: pointer; padding: 0 4px; }
 .zoom-back:hover { color: var(--accent-strong); border-color: var(--accent); }
-.zoom-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: #222; }
-.zseg { height: 100%; min-width: 6px; }
+.zoom-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: #3a3a3a; }
+.zseg { height: 100%; flex: 0 0 auto; }
 .zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
 
 .foot { margin-top: 8px; font-size: 9px; color: var(--text-muted); font-family: 'Courier New', monospace; }
