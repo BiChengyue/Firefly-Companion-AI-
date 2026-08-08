@@ -158,8 +158,10 @@ const winWindow = computed(() => {
   const nowSec = t.now - t.start
   let winStart: number, winEnd: number
   if (winMode.value === 'auto' || winCenter.value === null) {
-    winStart = Math.max(0, nowSec - 3600)
-    winEnd = nowSec
+    // AUTO：窗口正好覆盖已记录数据（最后采样 → 前 1 小时），末尾不留空隙
+    const lastAt = Math.min(nowSec, Math.max(0, (state.value?.last_at ?? t.now) - t.start))
+    winEnd = lastAt
+    winStart = Math.max(0, winEnd - 3600)
   } else {
     winStart = Math.max(0, winCenter.value - 1800)
     winEnd = Math.min(86400, winCenter.value + 1800)
