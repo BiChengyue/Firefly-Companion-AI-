@@ -147,9 +147,18 @@ fn phone_command(action: String, stream: Option<String>, value: Option<i32>) -> 
         }
         // 找手机（2026-08-08 暂时禁用——App 端逻辑保留，恢复时去掉前端 disabled 并还原此分支）
         "find_phone" => Err("找手机已禁用（恢复中，稍后再试）".into()),
-        "shizuku" => shell(&[
-            "sh", "/storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh",
-        ]),
+        "shizuku" => {
+            // 2026-08-08：Shizuku 新版激活 = 直接执行 libshizuku.so（旧 start.sh 已失效）。
+            // 路径哈希（~~xxx/pkg-hash）随版本/重装变化——用 pm path 动态解析，避免硬编码失效。
+            let out = shell(&["pm", "path", "moe.shizuku.privileged.api"])?;
+            let p = out.trim();
+            let p = p.strip_prefix("package:").unwrap_or(p);
+            let dir = p.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+            if dir.is_empty() {
+                return Err("Shizuku 未安装".into());
+            }
+            shell(&[&format!("{dir}/lib/arm64/libshizuku.so")])
+        }
         // 勿扰开关（2026-08-08：广播给 App —— NotificationManager 精确控制，与上报状态同源；
         // 未授权「勿扰访问权限」时 App 会跳授权页）
         "dnd_toggle" => {
