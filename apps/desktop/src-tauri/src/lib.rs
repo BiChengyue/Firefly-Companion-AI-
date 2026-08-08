@@ -59,6 +59,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             window::set_cursor_passthrough,
             window::move_window,
+            window::start_ctrl_override,
             read_bus_token,
         ])
         .setup(|app| {
@@ -68,6 +69,9 @@ pub fn run() {
             if let Some(pet_win) = app.get_webview_window("pet") {
                 let _ = pet_win.set_always_on_top(true);
             }
+
+            // T35：启动 Ctrl 全局钩子（按住拖动、松开穿透锁定）
+            window::start_ctrl_override(app.handle().clone());
 
             Ok(())
         })
