@@ -191,13 +191,22 @@ const winWindow = computed(() => {
     raw.push(s)
   }
   // 2026-08-08：绝对定位（与主条同机制）——flex width% 与主条 left% 解析基准不一致导致错位；累加 left
+  // 2026-08-08b：防御性强制按时间升序重排 + left 重算（防止任何来源的顺序异常导致副条左右翻转）
+  const sorted = [...raw].sort((a, b) => a.start - b.start)
   let acc = 0
-  const filled = raw.map((s) => {
+  const filled = sorted.map((s) => {
     const o = { ...s, left: acc }
-    acc += s.w
+    acc += o.w
     return o
   })
-  return { winStart, winEnd, segs: filled, mode: winMode.value }
+  // 2026-08-08c：副条补画未来黑色段（winEnd 之后到 now 之间的部分主条为黑色——副条同样画黑，不再露灰背景）
+  let futureLeft = 0
+  let futureW = 0
+  if (winEnd > nowSec) {
+    futureLeft = ((Math.max(winStart, nowSec) - winStart) / (winEnd - winStart)) * 100
+    futureW = ((winEnd - Math.max(winStart, nowSec)) / (winEnd - winStart)) * 100
+  }
+  return { winStart, winEnd, segs: filled, mode: winMode.value, futureLeft, futureW }
 })
 
 // 5 分钟闲置 → 回 auto（30s tick 检查）
@@ -362,6 +371,8 @@ onMounted(() => {
               :style="{ left: s.left + '%', width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
             />
+            <!-- 2026-08-08c：副条未来黑色段（与主条 future 一致） -->
+            <div v-if="winWindow.futureW > 0" class="zseg future" :style="{ left: winWindow.futureLeft + '%', width: winWindow.futureW + '%' }" />
           </div>
           <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
@@ -460,6 +471,7 @@ onMounted(() => {
 .zoom-back:hover { color: var(--accent-strong); border-color: var(--accent); }
 .zoom-bar { position: relative; display: block; height: 14px; border-radius: 3px; overflow: hidden; background: #3a3a3a; }
 .zseg { position: absolute; top: 0; height: 100%; }
+.zseg.future { background: #000 !important; }
 .zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
 
 .foot { margin-top: 8px; font-size: 9px; color: var(--text-muted); font-family: 'Courier New', monospace; }

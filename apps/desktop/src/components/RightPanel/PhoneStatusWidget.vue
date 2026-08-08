@@ -255,7 +255,14 @@ const winWindow = computed(() => {
     filled.push({ ...s, left: acc })
     acc += s.w
   }
-  return { winStart, winEnd, segs: filled, mode: winMode.value }
+  // 未来黑色段（与主条 future 一致）
+  let futureLeft = 0
+  let futureW = 0
+  if (winEnd > nowSec) {
+    futureLeft = ((Math.max(winStart, nowSec) - winStart) / (winEnd - winStart)) * 100
+    futureW = ((winEnd - Math.max(winStart, nowSec)) / (winEnd - winStart)) * 100
+  }
+  return { winStart, winEnd, segs: filled, mode: winMode.value, futureLeft, futureW }
 })
 
 function checkIdleAuto() {
@@ -405,6 +412,7 @@ function refresh() {
               :style="{ left: s.left + '%', width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
             />
+            <div v-if="winWindow.futureW > 0" class="zseg future" :style="{ left: winWindow.futureLeft + '%', width: winWindow.futureW + '%' }" />
           </div>
           <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
@@ -684,6 +692,7 @@ function refresh() {
   top: 0;
   height: 100%;
 }
+.zseg.future { background: #000 !important; }
 .zoom-detail {
   margin-top: 4px;
   font-size: 10px;
