@@ -172,9 +172,10 @@ async function refresh() {
   }
 }
 
+useSyncRefresh(refresh, 30000) // 30s 同步刷新线（setup 顶层订阅，onUnmounted 生效）
+
 onMounted(() => {
   refresh()
-  useSyncRefresh(refresh, 30000)
 })
 </script>
 
@@ -229,6 +230,15 @@ onMounted(() => {
       <!-- ④ 本日活动条 -->
       <div class="timeline-wrap">
         <div ref="barEl" class="timeline" @mousemove="onBarMove" @mouseleave="hoverSeg = null; hoverTime = null">
+          <!-- A：hover 放大窗在主条上的边界高亮 -->
+          <div
+            v-if="hoverTime !== null"
+            class="hover-mask"
+            :style="{
+              left: (hoverWindow ? (hoverWindow.winStart / timeline.total) * 100 : 0) + '%',
+              width: (hoverWindow ? ((hoverWindow.winEnd - hoverWindow.winStart) / timeline.total) * 100 : 0) + '%',
+            }"
+          />
           <div
             v-for="(s, i) in timeline.acts"
             :key="i"
@@ -320,7 +330,12 @@ onMounted(() => {
 .legend .empty { color: var(--text-tertiary); }
 
 .timeline-wrap { margin: 6px 0 4px; position: relative; }
-.timeline { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: #333; }
+.timeline { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: #333; position: relative; }
+.hover-mask {
+  position: absolute; top: 0; bottom: 0; z-index: 2;
+  border: 1.5px solid #fff; background: rgba(255, 255, 255, 0.15); border-radius: 3px;
+  pointer-events: none; box-sizing: border-box;
+}
 .tseg { height: 100%; }
 .tseg.empty { opacity: 0.3; }
 .tseg.future { background: #000 !important; }

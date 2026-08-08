@@ -13,9 +13,10 @@ const lastTs = ref(0)
 const loading = ref(false)
 let refreshVersion = 0
 
+useSyncRefresh(refresh, 30000) // 30s 同步刷新线（setup 顶层订阅）
+
 onMounted(async () => {
   await refresh()
-  useSyncRefresh(refresh, 30000) // 30s 同步刷新线
 })
 
 async function refresh() {
