@@ -89,9 +89,12 @@ function handleSetupClose() {
   showModelSetup.value = false
 }
 
-const bgImage = computed(() =>
-  companion.isWork ? `url(${photoUrl('work.png')})` : `url(${photoUrl('playground.png')})`,
-)
+const bgImage = computed(() => {
+  if (companion.isWork) return `url(${photoUrl('work.png')})`
+  // T34：深色模式用星空流萤背景图（bg-dark-firefly.jpg，1440×810 偏暗）
+  if (companion.themeMode === 'dark') return `url(${photoUrl('bg-dark-firefly.jpg')})`
+  return `url(${photoUrl('playground.png')})`
+})
 
 // ── TTS 当前播放控制 ──
 let currentAudio: HTMLAudioElement | null = null
@@ -272,7 +275,7 @@ onUnmounted(() => {
   <div
     v-if="isMainWindow"
     class="chat-client-root"
-    :class="companion.mode"
+    :class="[companion.mode, { dark: companion.themeMode === 'dark' && !companion.isWork }]"
   >
     <ErrorBoundary>
       <LeftSidebar />
@@ -390,6 +393,20 @@ body,
   pointer-events: none;
   z-index: 0;
   transition: opacity var(--transition);
+}
+
+/* T34：深色模式遮罩调高（星空图偏暗——0.42 在黑底上几乎不可见，调 0.7 用户反馈后定） */
+.chat-client-root.dark .bg-layer {
+  opacity: 0.7;
+}
+
+/* T34 修复：bg-layer 在 WebView 渲染异常（纯黑）——直接给 center-panel 设背景图兜底
+   （相对 /photo 走 vite proxy → 8765；与 photoUrl 同源） */
+.chat-client-root.dark .center-panel {
+  background-image: url('/photo/bg-dark-firefly.jpg');
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* 中央面板的子元素在背景之上 */

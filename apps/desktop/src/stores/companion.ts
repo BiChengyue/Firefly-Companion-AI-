@@ -34,6 +34,21 @@ export const useCompanionStore = defineStore('companion', () => {
   const workspaces = ref<{ id: string; name: string; path: string; isDefault?: boolean; pathExists?: boolean }[]>([])
   const activeWorkspaceId = ref<string | null>(localStorage.getItem('firefly_active_ws') || null)
 
+  // T34：深色模式开关（localStorage `firefly_dark_mode` 持久化；work 模式强制萨姆暗红不受其影响）
+  // 命名 themeMode 而非 theme——theme 已被「模式配置对象」占用（applyModeConfig）
+  const themeMode = ref<'light' | 'dark'>(
+    localStorage.getItem('firefly_dark_mode') === 'dark' ? 'dark' : 'light',
+  )
+
+  function toggleThemeMode() {
+    themeMode.value = themeMode.value === 'dark' ? 'light' : 'dark'
+    try {
+      localStorage.setItem('firefly_dark_mode', themeMode.value)
+    } catch {
+      // localStorage 不可用（隐私模式）→ 仅本次会话生效
+    }
+  }
+
   // 阶段3：会话管理（数据源：后端 SQLite，localStorage 仅作 activeSessionId 缓存）
   const sessions = ref<Session[]>([])
   const activeSessionId = ref<string | null>(null)
@@ -925,6 +940,9 @@ async function renameSession(id: string, title: string) {
     lastError,
     isDaily,
     isWork,
+    // T34：深色模式开关
+    themeMode,
+    toggleThemeMode,
     sessions,
     activeSessionId,
     activeSession,

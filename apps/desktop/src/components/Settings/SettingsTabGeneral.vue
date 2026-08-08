@@ -45,6 +45,17 @@ function selectAvatar(category: 'daily' | 'work', filename: string) {
       ✅ 已解除限制：日常模式当前可执行 Agent 任务。
     </p>
 
+    <!-- T34：深色模式开关 -->
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <span class="toggle-label">🌙 深色模式</span>
+        <span class="toggle-desc">聊天界面切换纯黑配色 + 星空背景（刷新后保持；work 模式保持萨姆暗红主题）</span>
+      </div>
+      <button class="toggle-switch" :class="{ active: companion.themeMode === 'dark' }" @click="companion.toggleThemeMode()">
+        <span class="toggle-knob" />
+      </button>
+    </div>
+
     <div class="divider" />
     <div class="toggle-row">
       <div class="toggle-info">

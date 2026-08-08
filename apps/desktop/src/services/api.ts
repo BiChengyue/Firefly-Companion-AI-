@@ -111,7 +111,9 @@ export interface FitnessDaily {
 }
 
 export interface FitnessHistory {
-  days: FitnessDaily[]
+  /** 请求回显的 days 参数（数字，非数组）；数据在 history（2026-08-08 实测 bus 返回） */
+  days: number
+  history: FitnessDaily[]
 }
 
 /** 拉取最新健康数据（bus /api/v1/fitness，只读）。失败抛错（调用方降级显示「健康数据暂不可用」）。 */

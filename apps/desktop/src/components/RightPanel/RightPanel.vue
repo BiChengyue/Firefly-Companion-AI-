@@ -1,14 +1,12 @@
 <script setup lang="ts">
-/** 右侧面板 — 角色卡片 + 小组件聚合。 */
+/** 右侧面板 — 角色卡片 + 精简小组件（T32：天气/服务器/健康 3 卡片；
+ *  任务/提醒/记忆已挪左栏，见 LeftSidebar.vue）。 */
 import { useCompanionStore } from '@/stores/companion'
 import CharacterCard from './CharacterCard.vue'
-import TaskWidget from './TaskWidget.vue'
-import ReminderWidget from './ReminderWidget.vue'
 import WeatherWidget from './WeatherWidget.vue'
 import SystemStatusWidget from './SystemStatusWidget.vue'
 import ServerStatusWidget from './ServerStatusWidget.vue'
 import HealthWidget from './HealthWidget.vue'
-import MemoryWidget from './MemoryWidget.vue'
 
 const companion = useCompanionStore()
 </script>
@@ -16,13 +14,10 @@ const companion = useCompanionStore()
 <template>
   <aside class="right-panel">
     <CharacterCard />
-    <TaskWidget />
-    <ReminderWidget />
     <WeatherWidget v-if="companion.isDaily" />
     <SystemStatusWidget v-else />
     <ServerStatusWidget />
     <HealthWidget />
-    <MemoryWidget />
   </aside>
 </template>
 

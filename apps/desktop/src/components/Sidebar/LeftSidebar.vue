@@ -14,17 +14,8 @@ import { useTaskSync } from '@/composables/useTaskSync'
 const companion = useCompanionStore()
 const { sortedTasks, toggleTask, deleteTask, addTask, onExternalChange } = useTaskSync()
 
-// ── T32：提醒折叠区（右侧 ReminderWidget 挪入，默认折叠）──────
-const showReminders = ref(false)
-
-// ── T32：记忆管理入口（右侧 MemoryWidget 挪入，弹窗展示）─────
-const showMemory = ref(false)
-
 // ── 设置弹窗 ────────────────────────────────────────────
 const showSettings = ref(false)
-
-// ── 任务历史面板 ──────────────────────────────────────
-const showTaskHistory = ref(false)
 
 // ── 监听跨组件任务同步 ──────────────────────────────────
 let unsubTasks: (() => void) | null = null
@@ -39,10 +30,10 @@ function clearSearch() {
 }
 
 // ── 系统工具（阶段4：激活为 Agent 快捷入口）──────────────────
+// T33：任务历史面板已恒展开于任务卡片内，工具菜单不再需要「任务历史」开关项
 const tools = [
   { id: 'agent-console', label: 'Agent 控制台', disabled: false, action: () => toggleHud() },
   { id: 'tools-center', label: '工具中心', disabled: false, action: () => { showSettings.value = true } },
-  { id: 'task-history', label: '任务历史', disabled: false, action: () => { showTaskHistory.value = !showTaskHistory.value } },
 ]
 
 function toggleHud() {
@@ -247,160 +238,151 @@ const userAvatarChar = computed(() =>
 
     <hr class="sep" />
 
-    <!-- 历史会话列表 -->
-    <div class="section-title">
-      历史会话
-      <button class="add-task-btn" title="新建会话" @click="handleNewSession">＋</button>
+    <!-- ① 历史会话卡片 -->
+    <div class="left-card">
+      <div class="left-card-head">
+        <span>历史会话</span>
+        <button class="add-task-btn" title="新建会话" @click="handleNewSession">＋</button>
+      </div>
+      <ul v-if="filteredSessions.length" class="session-list">
+        <li
+          v-for="s in filteredSessions"
+          :key="s.id"
+          class="session-item"
+          :class="{ active: companion.activeSessionId === s.id, renaming: renamingId === s.id }"
+          @click="renamingId !== s.id && handleSwitchSession(s.id)"
+        >
+          <span class="session-dot" />
+          <div class="session-info">
+            <input
+              v-if="renamingId === s.id"
+              ref="renameInput"
+              v-model="renameTitle"
+              class="session-rename-input"
+              @keydown.enter="commitRename()"
+              @keydown.escape="cancelRename()"
+              @blur="commitRename()"
+              @click.stop
+            />
+            <template v-else>
+              <span class="session-title" @dblclick="startRename(s, $event)" title="双击重命名">{{ s.title }}</span>
+              <span class="session-time">{{ new Date(s.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
+            </template>
+          </div>
+          <button class="session-del" title="删除会话" @click.stop="handleDeleteSession(s.id)">×</button>
+        </li>
+      </ul>
+      <div v-else class="empty-hint">暂无历史会话</div>
     </div>
-    <ul v-if="filteredSessions.length" class="session-list">
-      <li
-        v-for="s in filteredSessions"
-        :key="s.id"
-        class="session-item"
-        :class="{ active: companion.activeSessionId === s.id, renaming: renamingId === s.id }"
-        @click="renamingId !== s.id && handleSwitchSession(s.id)"
-      >
-        <span class="session-dot" />
-        <div class="session-info">
-          <input
-            v-if="renamingId === s.id"
-            ref="renameInput"
-            v-model="renameTitle"
-            class="session-rename-input"
-            @keydown.enter="commitRename()"
-            @keydown.escape="cancelRename()"
-            @blur="commitRename()"
-            @click.stop
-          />
-          <template v-else>
-            <span class="session-title" @dblclick="startRename(s, $event)" title="双击重命名">{{ s.title }}</span>
-            <span class="session-time">{{ new Date(s.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
-          </template>
+
+    <!-- ② 工作空间卡片 -->
+    <div class="left-card">
+      <div class="left-card-head">
+        <span>📁 工作空间</span>
+        <button class="add-task-btn" title="添加工作空间" @click="showWsAdd = !showWsAdd">＋</button>
+      </div>
+
+      <div v-if="showWsAdd" class="ws-add-form">
+        <input v-model="newWsName" class="add-task-input" placeholder="空间名称（留空自动取文件夹名）"
+          @keydown.escape="showWsAdd = false" />
+        <button class="ws-pick-btn" @click="handlePickFolder">📁 选择目录</button>
+        <div v-if="newWsPath" class="ws-path-preview">{{ newWsPath }}</div>
+        <div v-else class="ws-path-hint">尚未选择目录</div>
+        <button class="ws-add-ok" @click="handleWsAdd">✓ 创建</button>
+      </div>
+
+      <ul v-if="filteredWorkspaces.length" class="workspace-list">
+        <li
+          v-for="ws in filteredWorkspaces"
+          :key="ws.id"
+          class="ws-item"
+          :class="{ active: companion.activeWorkspaceId === ws.id, 'ws-missing': !ws.pathExists }"
+          @click="selectWorkspace(companion.activeWorkspaceId === ws.id ? null : ws.id)"
+          :title="!ws.pathExists ? '工作空间路径不存在，请在文件资源管理器中检查' : ''"
+        >
+          <span class="ws-dot" :class="{ 'ws-dot-missing': !ws.pathExists }" />
+          <div class="ws-info">
+            <span class="ws-name">
+              {{ ws.name }}
+              <span v-if="ws.isDefault" class="ws-badge">🔒</span>
+              <span v-if="!ws.pathExists" class="ws-warn">⚠ 不可用</span>
+            </span>
+            <span class="ws-path">{{ truncatePath(ws.path) }}</span>
+          </div>
+          <button
+            v-if="!ws.isDefault"
+            class="ws-act-btn danger"
+            title="删除"
+            @click.stop="handleDeleteWs(ws.id)">×</button>
+        </li>
+      </ul>
+      <div v-if="companion.workspaces.length === 0 && !showWsAdd" class="empty-hint">
+        暂无工作空间 — 点击＋添加目录
+      </div>
+    </div>
+
+    <!-- ③ 任务卡片（任务 + 历史，恒展开） -->
+    <div class="left-card">
+      <div class="left-card-head">
+        <span>任务</span>
+        <button class="add-task-btn" title="添加任务" @click.stop.prevent="startAddTask($event)">＋</button>
+      </div>
+
+      <!-- 新增任务输入 -->
+      <div v-if="showAddTask" class="add-task-row">
+        <input
+          ref="addTaskInput"
+          v-model="newTaskText"
+          type="text"
+          placeholder="输入任务名..."
+          class="add-task-input"
+          @keydown.enter="commitNewTask"
+          @keydown.escape="cancelAddTask"
+        />
+        <button class="task-confirm-btn" title="确认添加" @click="commitNewTask">✓</button>
+        <button class="task-cancel-btn" title="取消" @click="cancelAddTask">✕</button>
+      </div>
+
+      <ul v-if="filteredTasks.length" class="task-list">
+        <li
+          v-for="t in filteredTasks"
+          :key="t.id"
+          class="task-item"
+          :class="{ done: t.done }"
+          @click="toggleTask(t.id)"
+        >
+          <span class="task-check">{{ t.done ? '☑' : '☐' }}</span>
+          <span class="task-text">{{ t.text }}</span>
+          <button class="task-del" title="删除任务" @click.stop="deleteTask(t.id, $event)">×</button>
+        </li>
+      </ul>
+      <div v-else class="empty-hint">无匹配结果</div>
+
+      <!-- 任务历史面板（恒展开，T33 并入任务卡片） -->
+      <div class="history-panel inline">
+        <div class="history-header">Agent 任务历史</div>
+        <div v-if="companion.taskHistory.length" class="history-list">
+          <div v-for="h in companion.taskHistory" :key="h.id" class="history-item">
+            <span class="h-status">{{ taskHistoryStatusLabel(h.status) }}</span>
+            <span class="h-input">{{ h.user_input.slice(0, 40) }}</span>
+            <span class="h-time">{{ new Date(h.created_at).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) }}</span>
+          </div>
         </div>
-        <button class="session-del" title="删除会话" @click.stop="handleDeleteSession(s.id)">×</button>
-      </li>
-    </ul>
-    <div v-else class="empty-hint">暂无历史会话</div>
-
-    <hr class="sep" />
-
-    <!-- 任务列表 -->
-    <div class="section-title clickable" @click="startAddTask($event)">
-      <span>任务</span>
-      <button class="add-task-btn" title="添加任务" @click.stop.prevent="startAddTask($event)">＋</button>
-    </div>
-
-    <!-- 新增任务输入 -->
-    <div v-if="showAddTask" class="add-task-row">
-      <input
-        ref="addTaskInput"
-        v-model="newTaskText"
-        type="text"
-        placeholder="输入任务名..."
-        class="add-task-input"
-        @keydown.enter="commitNewTask"
-        @keydown.escape="cancelAddTask"
-      />
-      <button class="task-confirm-btn" title="确认添加" @click="commitNewTask">✓</button>
-      <button class="task-cancel-btn" title="取消" @click="cancelAddTask">✕</button>
-    </div>
-
-    <ul v-if="filteredTasks.length" class="task-list">
-      <li
-        v-for="t in filteredTasks"
-        :key="t.id"
-        class="task-item"
-        :class="{ done: t.done }"
-        @click="toggleTask(t.id)"
-      >
-        <span class="task-check">{{ t.done ? '☑' : '☐' }}</span>
-        <span class="task-text">{{ t.text }}</span>
-        <button class="task-del" title="删除任务" @click.stop="deleteTask(t.id, $event)">×</button>
-      </li>
-    </ul>
-    <div v-else class="empty-hint">无匹配结果</div>
-
-    <hr class="sep" />
-
-    <!-- T32：提醒折叠区（ReminderWidget 挪入，默认折叠）
-         ⚠ 用 v-show 而非 v-if：scheduler 的 checkReminders 依赖组件 onMounted，
-         折叠也必须保持挂载，提醒才照常触发 -->
-    <div class="reminder-collapse">
-      <div class="collapse-head" @click="showReminders = !showReminders">
-        <span>⏰ 提醒</span>
-        <span class="collapse-arrow">{{ showReminders ? '▾' : '▸' }}</span>
-      </div>
-      <div v-show="showReminders" class="collapse-body">
-        <ReminderWidget />
+        <div v-else class="empty-hint">暂无任务记录</div>
       </div>
     </div>
 
-    <!-- 任务历史面板 -->
-    <div v-if="showTaskHistory" class="history-panel">
-      <div class="history-header">
-        Agent 任务历史
-        <button class="add-task-btn" @click="showTaskHistory = false">×</button>
-      </div>
-      <div v-if="companion.taskHistory.length" class="history-list">
-        <div v-for="h in companion.taskHistory" :key="h.id" class="history-item">
-          <span class="h-status">{{ taskHistoryStatusLabel(h.status) }}</span>
-          <span class="h-input">{{ h.user_input.slice(0, 40) }}</span>
-          <span class="h-time">{{ new Date(h.created_at).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) }}</span>
-        </div>
-      </div>
-      <div v-else class="empty-hint">暂无任务记录</div>
+    <!-- ④ 提醒卡片（ReminderWidget 内嵌恒展开；scheduler 依赖 onMounted，保持挂载） -->
+    <div class="left-card">
+      <ReminderWidget />
     </div>
 
-    <!-- 工作空间（阶段4.5：目录路径 + 会话关联） -->
-    <div class="section-title">
-      📁 工作空间
-      <button class="add-task-btn" title="添加工作空间" @click="showWsAdd = !showWsAdd">＋</button>
-    </div>
-
-    <div v-if="showWsAdd" class="ws-add-form">
-      <input v-model="newWsName" class="add-task-input" placeholder="空间名称（留空自动取文件夹名）"
-        @keydown.escape="showWsAdd = false" />
-      <button class="ws-pick-btn" @click="handlePickFolder">📁 选择目录</button>
-      <div v-if="newWsPath" class="ws-path-preview">{{ newWsPath }}</div>
-      <div v-else class="ws-path-hint">尚未选择目录</div>
-      <button class="ws-add-ok" @click="handleWsAdd">✓ 创建</button>
-    </div>
-
-    <ul v-if="filteredWorkspaces.length" class="workspace-list">
-      <li
-        v-for="ws in filteredWorkspaces"
-        :key="ws.id"
-        class="ws-item"
-        :class="{ active: companion.activeWorkspaceId === ws.id, 'ws-missing': !ws.pathExists }"
-        @click="selectWorkspace(companion.activeWorkspaceId === ws.id ? null : ws.id)"
-        :title="!ws.pathExists ? '工作空间路径不存在，请在文件资源管理器中检查' : ''"
-      >
-        <span class="ws-dot" :class="{ 'ws-dot-missing': !ws.pathExists }" />
-        <div class="ws-info">
-          <span class="ws-name">
-            {{ ws.name }}
-            <span v-if="ws.isDefault" class="ws-badge">🔒</span>
-            <span v-if="!ws.pathExists" class="ws-warn">⚠ 不可用</span>
-          </span>
-          <span class="ws-path">{{ truncatePath(ws.path) }}</span>
-        </div>
-        <button
-          v-if="!ws.isDefault"
-          class="ws-act-btn danger"
-          title="删除"
-          @click.stop="handleDeleteWs(ws.id)">×</button>
-      </li>
-    </ul>
-    <div v-if="companion.workspaces.length === 0 && !showWsAdd" class="empty-hint">
-      暂无工作空间 — 点击＋添加目录
+    <!-- ⑤ 记忆管理卡片（MemoryWidget 内嵌恒展开） -->
+    <div class="left-card">
+      <MemoryWidget />
     </div>
     </div>
     <!-- /sidebar-scroll -->
-
-    <!-- T32：记忆管理入口（右侧 MemoryWidget 挪入；footer 上方） -->
-    <button class="memory-entry" @click="showMemory = true" title="搜索/管理记忆">
-      🧠 记忆管理
-    </button>
 
     <!-- 底部用户区（固定底部，不随列表滚动） -->
     <div class="sidebar-footer">
@@ -415,16 +397,6 @@ const userAvatarChar = computed(() =>
   <!-- 设置弹窗（Teleport 到 body 避免 sidebar overflow 裁剪） -->
   <Teleport to="body">
     <SettingsModal v-if="showSettings" @close="showSettings = false" />
-    <!-- T32：记忆管理弹窗（MemoryWidget 挪入左栏后以弹窗展示） -->
-    <div v-if="showMemory" class="memory-modal" @click.self="showMemory = false">
-      <div class="memory-modal-body">
-        <div class="memory-modal-head">
-          <span>🧠 记忆管理</span>
-          <button class="memory-modal-close" title="关闭" @click="showMemory = false">✕</button>
-        </div>
-        <MemoryWidget />
-      </div>
-    </div>
   </Teleport>
 </template>
 
@@ -923,84 +895,38 @@ const userAvatarChar = computed(() =>
 
 .user-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 
-/* ── T32：提醒折叠区 + 记忆入口 + 记忆弹窗 ────────────────── */
-.reminder-collapse {
-  margin: 2px 0 4px;
-}
-.collapse-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 5px 4px;
-  border-radius: var(--radius-sm);
-  user-select: none;
-}
-.collapse-head:hover {
-  background: var(--bg-card);
-  color: var(--text-primary);
-}
-.collapse-arrow {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.collapse-body {
-  padding: 2px 0 4px;
-}
-.memory-entry {
-  display: block;
-  width: calc(100% - 16px);
-  margin: 8px;
-  padding: 7px 10px;
-  font-size: 12px;
-  text-align: left;
-  color: var(--text-secondary);
+/* ── T33：5 区块卡片化（历史/工作空间/任务/提醒/记忆，全部恒展开）── */
+.left-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  padding: 10px 12px;
+  flex-shrink: 0;
 }
-.memory-entry:hover {
-  color: var(--color-primary);
-  background: var(--bg-card);
-}
-.memory-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.memory-modal-head {
+.left-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-primary);
+  margin-bottom: 8px;
 }
-.memory-modal-close {
-  background: none;
+/* 内嵌组件（ReminderWidget/MemoryWidget）自身卡片容器透明化，只留 left-card 一层底 */
+.left-card :deep(.card),
+.left-card :deep(.memory-widget) {
+  background: transparent;
   border: none;
-  font-size: 16px;
-  color: var(--text-muted);
-  cursor: pointer;
-  line-height: 1;
+  box-shadow: none;
+  padding: 0;
 }
-.memory-modal-close:hover { color: var(--color-danger, #ef4444); }
-.memory-modal-body {
-  max-height: 70vh;
-  overflow-y: auto;
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  background: var(--bg-solid); /* T32 透明修复：--bg-surface 深色主题是 rgba 半透明，浮层必须不透明 */
-  border: 1px solid var(--border-main);
-  width: min(560px, 90vw);
+/* 任务卡片内的任务历史（恒展开，T33）：细分隔线，保留 160px 滚动 */
+.history-panel.inline {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 8px 0 0;
+  margin-top: 8px;
 }
 </style>

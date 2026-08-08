@@ -105,6 +105,49 @@
   --radius-lg: 12px;
 }
 
+/* ── T34：日常深色模式（纯黑系，用户开关启用；work 萨姆暗红不受影响）── */
+.chat-client-root.dark {
+  /* ── 背景与表面（纯黑系） ── */
+  --bg-root: #000000;
+  --bg-surface: #0c0c0c;
+  --bg-solid: #121212; /* 不透明版（弹窗/浮层） */
+  --bg-surface-hover: #1a1a1a;
+  --bg-elevated: #141414;
+  --bg-glass: rgba(12, 12, 12, 0.85);
+  --bg-input: #1a1a1a;
+
+  /* ── 边框 ── */
+  --border-main: #2a2a2a;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-accent: rgba(120, 220, 160, 0.35);
+
+  /* ── 文字 ── */
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --text-placeholder: #4b5563;
+  --text-on-accent: #fff;
+
+  /* ── 强调色（保留流萤嫩绿暖色点缀） ── */
+  --accent: #5ebd82;
+  --accent-strong: #3da061;
+  --accent-light: rgba(120, 220, 160, 0.18);
+  --accent-glow: rgba(120, 220, 160, 0.3);
+  --accent-neon-glow: rgba(120, 220, 160, 0.55);
+
+  /* ── 聊天气泡（无白底） ── */
+  --bubble-user-bg: #1f2937;
+  --bubble-user-text: #e5e7eb;
+  --bubble-assistant-bg: #111827;
+  --bubble-assistant-text: #e5e7eb;
+  --bubble-assistant-border: rgba(120, 220, 160, 0.2);
+
+  /* ── 阴影（深色下更深） ── */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    双模式差异化拉条系统 (Dual-Theme Custom Scrollbar System)
    使得 ChatPanel, RightPanel, LeftSidebar, SamHUD, Reminders,

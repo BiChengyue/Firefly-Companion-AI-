@@ -11,6 +11,9 @@ marked.setOptions({ breaks: true, gfm: true })
 const props = defineProps<{ msg: ChatMessage }>()
 const companion = useCompanionStore()
 
+/** T34：右键菜单 Teleport 到 body（不在 .chat-client-root 内），菜单自身带 dark class 才能吃深色样式 */
+const isDarkMenu = computed(() => companion.themeMode === 'dark' && !companion.isWork)
+
 /** Markdown → HTML，空内容返回 '' */
 const renderedContent = computed(() => {
   const raw = props.msg.content?.trim()
@@ -320,6 +323,7 @@ onUnmounted(() => document.removeEventListener('click', onGlobalClick))
     <div
       v-if="menuVisible"
       class="msg-context-menu"
+      :class="{ dark: isDarkMenu }"
       :style="{ left: menuX + 'px', top: menuY + 'px' }"
       @click.stop
     >
@@ -1101,18 +1105,42 @@ onUnmounted(() => document.removeEventListener('click', onGlobalClick))
   font-size: 14px;
 }
 
-/* 深色主题适配（ChatPanel 根节点有 .dark 时） */
-.dark .msg-context-menu {
+/* 深色主题适配（T34：菜单 Teleport 到 body，dark class 挂在菜单自身） */
+.msg-context-menu.dark {
   background: rgba(32, 32, 36, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-.dark .cm-item {
+.msg-context-menu.dark .cm-item {
   color: #ff6b6b;
 }
 
-.dark .cm-item:hover {
+.msg-context-menu.dark .cm-item:hover {
   background: rgba(255, 107, 107, 0.12);
+}
+
+/* ── T34：日常深色模式气泡覆写（硬编码白/浅底 → 纯黑系；work 萨姆暗红不动）── */
+.chat-client-root.dark .bubble.user.daily {
+  background: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+.chat-client-root.dark .bubble.user.daily:hover {
+  border-color: #4b5563;
+}
+.chat-client-root.dark .bubble.assistant.daily {
+  background: #111827;
+  border-color: #2a2a2a;
+  color: #e5e7eb;
+}
+.chat-client-root.dark .bubble.assistant.daily:hover {
+  border-color: #3f3f46;
+}
+/* T34：Token 明细面板（白底浮层 → 深色） */
+.chat-client-root.dark .token-detail-panel {
+  background: #141414;
+  border-color: #2a2a2a;
+  color: #e5e7eb;
 }
 </style>

@@ -28,6 +28,7 @@ export default defineConfig({
       // T-31-A2：fitness（最新 + 历史）走 bus（8766）
       '/api/v1/fitness': 'http://100.111.201.71:8766',
       '/api': 'http://100.111.201.71:8765',
+      '/photo': 'http://100.111.201.71:8765', // T34：背景图/头像 dev 走 proxy（photoUrl 相对路径）
       '/health': 'http://100.111.201.71:8765',
       '/memes': 'http://100.111.201.71:8765',
       '/user-memes': 'http://100.111.201.71:8765',
