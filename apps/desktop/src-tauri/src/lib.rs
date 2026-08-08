@@ -210,13 +210,12 @@ fn phone_command(action: String) -> Result<String, String> {
             run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "pull", "/sdcard/record.mp4", &out])?;
             Ok(format!("saved:{out}"))
         }
-        // 访问文件：pull /sdcard/Download 到电脑并打开资源管理器
+        // 访问文件：在手机上打开文件管理器浏览（不复制文件到电脑）——2026-08-08 修正
         "pull_files" => {
-            let dest = r"C:\ProgramData\firefly-bot\phone_files\Download";
-            let _ = std::fs::create_dir_all(dest);
-            run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "pull", "/sdcard/Download", dest])?;
-            let _ = std::process::Command::new("explorer").arg(dest).spawn();
-            Ok(format!("opened:{dest}"))
+            shell(&[
+                "am", "start", "-a", "android.intent.action.VIEW",
+                "-d", "file:///sdcard/Download",
+            ])
         }
         // 一键投屏：scrcpy（已安装到 E:\AI\scrcpy）
         "scrcpy" => {
