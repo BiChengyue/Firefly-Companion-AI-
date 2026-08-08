@@ -261,7 +261,8 @@ export const useCompanionStore = defineStore('companion', () => {
 
   // ── 后端创建会话 ───────────────────────────────────────
   async function createSessionInBackend(title?: string) {
-    const id = `s${Date.now()}`
+    // 2026-08-08：统一 desktop- 前缀（与 desktopOnlySessions 过滤一致，防新会话从列表消失）
+    const id = `desktop-${crypto.randomUUID()}`
     try {
       await api.createSession(id, title || '新会话', mode.value)
     } catch (e) {
