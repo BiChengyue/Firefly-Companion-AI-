@@ -350,6 +350,7 @@ onUnmounted(() => {
 
 <style>
 html,
+html,
 body,
 #app {
   margin: 0;

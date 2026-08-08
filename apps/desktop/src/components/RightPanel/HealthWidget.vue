@@ -127,12 +127,11 @@ function gradeColor(steps: number): string {
 }
 
 /** 2026-08-08：折线分段（相邻点每段一个线性渐变，从起点色过渡到终点色） */
-const segColors = computed(() => {
-  const pts = trendPts.value
+function segsFrom(pts: Array<{ x: number; y: number; steps: number }>, prefix: string) {
   const segs: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; c1: string; c2: string }> = []
   for (let i = 0; i < pts.length - 1; i++) {
     segs.push({
-      id: `tg-${i}`,
+      id: `${prefix}-${i}`,
       x1: pts[i].x,
       y1: pts[i].y,
       x2: pts[i + 1].x,
@@ -142,6 +141,35 @@ const segColors = computed(() => {
     })
   }
   return segs
+}
+const segColors = computed(() => segsFrom(trendPts.value, 'tg'))
+
+// ── 2026-08-08：趋势大图（点击小图展开，卡片下部显示）──
+const showTrendLarge = ref(false)
+const SVG_LG_W = 300
+const SVG_LG_H = 160
+const trendPtsLg = computed(() => {
+  const days = (history.value?.history ?? [])
+    .filter((d) => d.steps != null)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .slice(-7)
+  if (!days.length) return []
+  const nums = days.map((d) => Number(d.steps))
+  const max = Math.max(...nums)
+  const min = Math.min(...nums)
+  const range = max - min || 1
+  const PAD = 12
+  return days.map((d, i) => {
+    const x = days.length === 1 ? SVG_LG_W / 2 : PAD + (i / (days.length - 1)) * (SVG_LG_W - PAD * 2)
+    const y = SVG_LG_H - 16 - ((Number(d.steps) - min) / range) * (SVG_LG_H - 32)
+    return { x, y, date: d.date.slice(5), steps: Number(d.steps), label: Number(d.steps).toLocaleString() }
+  })
+})
+const segColorsLg = computed(() => segsFrom(trendPtsLg.value, 'tglg'))
+const areaPathLg = computed(() => {
+  const pts = trendPtsLg.value
+  if (!pts.length) return ''
+  return `${trendPtsLg.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L ${pts[pts.length - 1].x.toFixed(1)},${SVG_LG_H} L ${pts[0].x.toFixed(1)},${SVG_LG_H} Z`
 })
 
 const polyPoints = computed(() =>
@@ -213,7 +241,7 @@ function onSvgMove(e: MouseEvent) {
         </div>
         <div class="cell trend-cell">
           <span class="c-label">📈 近 7 天步数</span>
-          <div class="chart-wrap">
+          <div class="chart-wrap" :class="{ large: showTrendLarge }" @click="showTrendLarge = !showTrendLarge" title="点击查看大图">
             <svg
               v-if="trendPts.length"
               class="sparkline"
@@ -271,6 +299,53 @@ function onSvgMove(e: MouseEvent) {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- 2026-08-08：趋势大图（点击小图展开，卡片下部显示；再点收起） -->
+      <div v-if="showTrendLarge && trendPtsLg.length" class="trend-large">
+        <svg :viewBox="`0 0 ${SVG_LG_W} ${SVG_LG_H}`" class="trend-large-svg">
+          <defs>
+            <linearGradient v-for="sg in segColorsLg" :key="sg.id" :id="sg.id" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" :stop-color="sg.c1" />
+              <stop offset="100%" :stop-color="sg.c2" />
+            </linearGradient>
+            <linearGradient id="trendAreaLg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25" />
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          <path :d="areaPathLg" fill="url(#trendAreaLg)" />
+          <line
+            v-for="sg in segColorsLg"
+            :key="sg.id"
+            :x1="sg.x1" :y1="sg.y1" :x2="sg.x2" :y2="sg.y2"
+            :stroke="`url(#${sg.id})`" stroke-width="2" stroke-linecap="round"
+          />
+          <!-- 数值标注 -->
+          <text
+            v-for="p in trendPtsLg"
+            :key="'t' + p.date"
+            :x="p.x" :y="p.y - 8"
+            text-anchor="middle" font-size="9" fill="var(--text-secondary)"
+          >{{ p.label }}</text>
+          <!-- 日期标注 -->
+          <text
+            v-for="p in trendPtsLg"
+            :key="'d' + p.date"
+            :x="p.x" :y="SVG_LG_H - 2"
+            text-anchor="middle" font-size="9" fill="var(--text-tertiary)"
+          >{{ p.date }}</text>
+          <!-- 点 -->
+          <circle
+            v-for="(p, i) in trendPtsLg"
+            :key="'c' + p.date"
+            :cx="p.x" :cy="p.y"
+            :r="i === trendPtsLg.length - 1 ? 4 : 2.5"
+            :fill="gradeColor(p.steps)"
+            :stroke="i === trendPtsLg.length - 1 ? '#fff' : 'none'"
+            stroke-width="1"
+          />
+        </svg>
       </div>
 
       <div class="foot">
@@ -381,6 +456,18 @@ function onSvgMove(e: MouseEvent) {
   /* T33：hover tooltip 定位容器 */
   position: relative;
   width: 100%;
+  cursor: pointer;      /* 2026-08-08：点击展开/收起大图 */
+}
+/* 2026-08-08：趋势大图（卡片下部展开） */
+.trend-large {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.trend-large-svg {
+  width: 100%;
+  height: 160px;
+  display: block;
 }
 .chart-tip {
   position: absolute;
