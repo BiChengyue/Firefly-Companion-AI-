@@ -1,197 +1,121 @@
 <script setup lang="ts">
-/**
- * 手机状态卡 — 基于电脑卡布局逐步换手机接口。
- * 布局（保持电脑卡顺序）：①标题栏 ②当前应用 ③资源占用条(电量/存储/内存)
- * ④圆环+图例 ⑤活动条+三态预览窗 ⑥foot(屏幕分钟)
- * 手机特有：勿扰开关/网络/位置(轨迹)插在③下方。
- *
- * 数据源：phone mock（接口未接）；接入 hub GET /api/v1/phone-state 后填 refresh()。
- */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+/** 电脑状态卡（A3 v2）— 本地读 sensor state 文件（不走 hub），30s 同步刷新。
+ *  布局：①前台进程(焦点绿/非焦点蓝/检测器绿红) ②占用条 ③当日圆环+图例 ④本日活动条 ⑤foot */
+import { ref, computed, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { useSyncRefresh } from '@/composables/useSyncRefresh'
 
-/** 未来 hub /api/v1/phone-state 契约 */
-interface Seg { start: number; end: number; type: string; label?: string }
-interface TrackPt { t: number; lat: number; lng: number }
-interface PhoneState {
+interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
+interface SensorState {
+  category?: string
+  game?: string | null
+  video?: string | null
+  sitting_minutes?: number
   last_at?: number
-  battery?: number
-  charging?: { active: boolean; method?: 'wired' | 'wireless' }
-  storage_pct?: number
-  ram_pct?: number
-  dnd?: boolean
-  network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }
-  loc_bucket?: 'home' | 'work' | 'out'
-  track?: TrackPt[]
-  focus_app?: { name: string; cat: string } | null
-  screen_today_min?: number
+  screens?: Array<{ monitor: number; name: string; primary: boolean; category: string; proc?: string | null; streaming?: boolean }>
+  focus_monitor?: number
+  system_usage?: { cpu?: number; mem?: number; disk?: Record<string, number>; gpu?: number }
+  detector_ok?: boolean
+  error?: string | null
   today_activities?: Seg[]
   today_categories?: Record<string, number>
 }
 
-function mockActivities(): Seg[] {
-  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
-  const base = t0.getTime() / 1000
-  const now = Date.now() / 1000
-  const plan: Array<[number, number, string, string?]> = [
-    [8 * 3600, 8 * 3600 + 1500, 'social', '微信'],
-    [8 * 3600 + 1500, 9 * 3600 + 600, 'video', '哔哩哔哩'],
-    [10 * 3600, 11 * 3600, 'game', '云·星穹铁道'],
-    [11 * 3600, 12 * 3600, 'social', 'QQ'],
-    [12 * 3600, 13 * 3600, 'rest', undefined],
-    [13 * 3600, 14 * 3600 + 900, 'reading', '知乎'],
-    [15 * 3600, 16 * 3600, 'tool', '甲壳虫ADB'],
-    [16 * 3600, 17 * 3600, 'social', '微信'],
-  ]
-  return plan
-    .filter(([s]) => base + s < now)
-    .map(([s, e, t, l]) => ({ start: base + s, end: Math.min(base + e, now), type: t, ...(l ? { label: l } : {}) }))
-}
-const mockTrack: TrackPt[] = [
-  { t: Date.now() / 1000 - 8 * 3600, lat: 31.2304, lng: 121.4737 },
-  { t: Date.now() / 1000 - 7 * 3600, lat: 31.231, lng: 121.474 },
-  { t: Date.now() / 1000 - 6 * 3600, lat: 31.232, lng: 121.4745 },
-  { t: Date.now() / 1000 - 5 * 3600, lat: 31.233, lng: 121.475 },
-]
-
-const phone = ref<PhoneState | null>({
-  last_at: Date.now() / 1000,
-  battery: 87,
-  charging: { active: true, method: 'wireless' },
-  storage_pct: 64,
-  ram_pct: 58,
-  dnd: true,
-  network: { kind: 'wifi', ssid: '我家WiFi' },
-  loc_bucket: 'home',
-  track: mockTrack,
-  focus_app: { name: '微信', cat: 'social' },
-  screen_today_min: 156,
-  today_activities: mockActivities(),
-  today_categories: { social: 7800, video: 4200, game: 3600, reading: 5400, rest: 3600, tool: 3600 },
-})
+const state = ref<SensorState | null>(null)
 const error = ref('')
-const lastTs = ref(Date.now())
+const lastTs = ref(0)
 const loading = ref(false)
+const hoverSeg = ref<Seg | null>(null)      // 副条 hover 命中的段
+const barEl = ref<HTMLElement | null>(null)
+let refreshVersion = 0
 
-/** 勿扰开关（本地 UI；未来调 bus 下发手机端） */
-const dndOverride = ref<boolean | null>(null)
-function toggleDnd() {
-  if (!phone.value) return
-  const cur = dndOverride.value ?? phone.value.dnd ?? false
-  dndOverride.value = !cur
-}
-const showTrack = ref(false)
-function toggleTrack() {
-  showTrack.value = !showTrack.value
-}
+// 预览窗三态：auto（最近1h，常显）/ follow（跟随主条鼠标）/ lock（点击锁定）
+const winMode = ref<'auto' | 'follow' | 'lock'>('auto')
+const winCenter = ref<number | null>(null)  // follow/lock 的窗口中心（当天秒）
+let lastInteract = Date.now()
+const AUTO_IDLE_MS = 5 * 60 * 1000           // 5 分钟未与主条交互 → 回 auto
 
-/** 30s 心跳 → 5 分钟无心跳离线 */
-const stale = computed(() => {
-  if (!phone.value?.last_at) return true
-  return Date.now() / 1000 - phone.value.last_at > 5 * 60
-})
-
-/** 手机 App 分类（圆环/图例/活动条共用） */
 const CAT_LABELS: Record<string, string> = {
-  social: '社交', video: '影音', game: '游戏', shopping: '购物',
-  reading: '阅读', travel: '出行', finance: '金融', meeting: '会议',
-  life: '生活', browsing: '浏览网页', document: '文档办公',
-  tool: '工具', system: '系统', unknown: '其他', rest: '休息', away: '休息',
-  offline: '离线',
+  coding: '写代码', browsing: '浏览网页', communication: '通讯聊天', game: '游戏',
+  video: '看视频', document: '文档处理', meeting: '会议', design: '设计',
+  writing: '写作', tool: '工具', unknown: '其他', rest: '休息', away: '休息',
+  multi: '多任务', offline: '离线', star_rail: '星铁', firefly: '流萤',
 }
 const CAT_COLORS: Record<string, string> = {
-  social: '#a855f7', video: '#ef4444', game: '#f97316', shopping: '#ec4899',
-  reading: '#06b6d4', travel: '#14b8a6', finance: '#eab308', meeting: '#8b5cf6',
-  life: '#84cc16', browsing: '#eab308', document: '#0d9488',
-  tool: '#94a3b8', system: '#64748b', unknown: '#64748b', rest: '#22c55e', away: '#22c55e',
-  offline: '#9ca3af',
+  coding: '#3b82f6', browsing: '#eab308', communication: '#a855f7', game: '#f97316',
+  video: '#ef4444', document: '#0d9488', design: '#ec4899', writing: '#84cc16',
+  meeting: '#8b5cf6', tool: '#94a3b8', unknown: '#64748b', rest: '#22c55e', away: '#22c55e',
+  multi: '#eab308', offline: '#9ca3af', star_rail: '#f97316', firefly: '#06b6d4',
 }
-const LOC_LABELS: Record<string, string> = { home: '家', work: '公司', out: '外出' }
-const NET_LABELS: Record<string, string> = { wifi: 'Wi-Fi', mobile: '蜂窝', offline: '离线' }
 
-/** ② 当前应用行 */
-const focusRow = computed(() => phone.value?.focus_app ?? null)
-
-/** 手机特有：勿扰 / 网络 / 位置 */
-const basics = computed(() => {
-  const p = phone.value
-  return [
-    {
-      label: '勿扰',
-      value: (dndOverride.value ?? p?.dnd) != null ? ((dndOverride.value ?? p?.dnd) ? '开启' : '关闭') : '—',
-      toggle: true,
-    },
-    {
-      label: '网络',
-      value: p?.network
-        ? `${NET_LABELS[p.network.kind] ?? p.network.kind}${p.network.kind === 'wifi' && p.network.ssid ? `·${p.network.ssid}` : ''}`
-        : '—',
-    },
-    {
-      label: '位置',
-      value: p?.loc_bucket ? (LOC_LABELS[p.loc_bucket] ?? p.loc_bucket) : '—',
-      track: true,
-    },
-  ]
+const stale = computed(() => {
+  if (!state.value?.last_at) return false
+  return Date.now() / 1000 - state.value.last_at > 5 * 60
 })
-
-/** ③ 资源占用条：电量 / 存储 / 内存 */
+const sitting = computed(() => {
+  const s = state.value?.sitting_minutes
+  return typeof s === 'number' && s >= 1 ? Math.round(s) : 0
+})
+// 占用条数据（对齐服务器 bars）
 const resourceBars = computed(() => {
-  const p = phone.value
-  if (!p) return []
+  const u = state.value?.system_usage
+  if (!u) return []
   return [
-    { label: '电量', pct: p.battery ?? 0, sub: p.charging?.active ? (p.charging.method === 'wireless' ? '⚡无线' : '⚡有线') : '' },
-    { label: '存储', pct: p.storage_pct ?? 0 },
-    { label: '内存', pct: p.ram_pct ?? 0 },
+    { label: 'CPU', pct: u.cpu ?? 0 },
+    { label: '内存', pct: u.mem ?? 0 },
+    { label: '磁盘 C', pct: u.disk?.C ?? 0 },
+    ...(typeof u.gpu === 'number' ? [{ label: '显卡', pct: u.gpu }] : []),
   ]
 })
-
-/** ④ 当日圆环 + 图例 */
-const ringItems = computed(() => {
-  const cats = phone.value?.today_categories
-  if (!cats) return { items: [] as Array<{ k: string; pct: number }>, total: 0 }
-  const total = Object.values(cats).reduce((a, b) => a + b, 0)
-  if (!total) return { items: [], total: 0 }
-  const items = Object.entries(cats)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => ({ k, pct: v / total }))
-    .sort((a, b) => b.pct - a.pct)
-  return { items, total }
+// 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
+const procRows = computed(() => {
+  // 2026-08-08（手机卡）：只显示「当前应用」一行（删除副屏幕行）——名称 + 类型
+  // 数据暂用电脑 sensor 主屏（接口改造后换 phone.focus_app）
+  const rows: Array<{ name: string; cat: string; focus: boolean }> = []
+  const s = state.value?.screens?.find((x) => x.primary)
+  if (s) {
+    rows.push({ name: s.proc ?? '当前应用', cat: s.category, focus: true })
+  } else if (state.value?.category) {
+    rows.push({ name: '当前应用', cat: state.value.category ?? 'unknown', focus: true })
+  }
+  return rows
 })
+// 当日圆环数据
+// 圆环中心：>1 小时显示「X.X 时」，否则「X 分」
 const ringTotal = computed(() => {
   const total = ringItems.value.total
-  if (!total) return { v: '—', unit: '' }
-  if (total < 3600) return { v: Math.round(total / 60), unit: '分' }
-  return { v: (total / 3600).toFixed(1), unit: '时' }
+  if (total >= 3600) return { v: (total / 3600).toFixed(1), unit: '时' }
+  return { v: Math.round(total / 60), unit: '分' }
 })
-
-// ── ⑤ 活动条 + 三态预览窗（与电脑卡一致）──
-const DAY_SEC = 86400
+const ringItems = computed(() => {
+  const c = state.value?.today_categories ?? {}
+  const items = Object.entries(c).filter(([, v]) => v >= 60)
+  const total = items.reduce((a, [, v]) => a + v, 0)
+  return { items: items.map(([k, v]) => ({ k, v, pct: total ? v / total : 0 })), total }
+})
+// 活动条（0:00 → 24:00 全长，未来时段黑色）
 const timeline = computed(() => {
-  const acts = (phone.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
+  // 过滤零宽段 + 离线段（offline 当无记录显示，不占数据段）
+  const acts = (state.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
   const start = t0.getTime() / 1000
-  const end = start + DAY_SEC
+  const end = start + 86400
   const now = Date.now() / 1000
-  const widths = acts.map((s) => ((s.end - s.start) / DAY_SEC) * 100)
-  return { acts, start, end, total: DAY_SEC, now, widths }
+  // 全真实比例（不保底）——保证 hover-mask/主条/放大窗严格线性对应
+  const widths = acts.map((s) => ((s.end - s.start) / 86400) * 100)
+  return { acts, start, end, total: 86400, now, widths }
 })
-
-const hoverSeg = ref<Seg | null>(null)
-const barEl = ref<HTMLElement | null>(null)
-const winMode = ref<'auto' | 'follow' | 'lock'>('auto')
-const winCenter = ref<number | null>(null)
-let lastInteract = Date.now()
-const AUTO_IDLE_MS = 5 * 60 * 1000
-
+// A：主条交互——mousemove 跟随（follow）/ click 锁定 / mouseleave 未锁回 auto
 function onBarMove(e: MouseEvent) {
-  if (winMode.value === 'lock') return
+  if (winMode.value === 'lock') return // 锁定态不跟随
   lastInteract = Date.now()
   const el = barEl.value
   if (!el) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  // 2026-08-08：hover 到未来区（黑色）时钳到当前时间——窗口不越过 now
   const nowSec = Date.now() / 1000 - timeline.value.start
-  const sec = Math.min(ratio * DAY_SEC, Math.max(0, nowSec))
+  const sec = Math.min(ratio * 86400, Math.max(0, nowSec))
   winMode.value = 'follow'
   winCenter.value = sec
   hoverSeg.value = findSegAt(sec)
@@ -199,7 +123,7 @@ function onBarMove(e: MouseEvent) {
 function onBarClick(e: MouseEvent) {
   lastInteract = Date.now()
   if (winMode.value === 'lock') {
-    winMode.value = 'auto'
+    winMode.value = 'auto' // 再点解锁回 auto
     winCenter.value = null
   } else {
     const el = barEl.value
@@ -208,7 +132,7 @@ function onBarClick(e: MouseEvent) {
       const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
       const nowSec = Date.now() / 1000 - timeline.value.start
       winMode.value = 'lock'
-      winCenter.value = Math.min(ratio * DAY_SEC, Math.max(0, nowSec))
+      winCenter.value = Math.min(ratio * 86400, Math.max(0, nowSec))
       hoverSeg.value = findSegAt(winCenter.value)
     }
   }
@@ -225,18 +149,21 @@ function findSegAt(sec: number): Seg | null {
   return timeline.value.acts.find((s) => t >= s.start && t < s.end) ?? null
 }
 
+// 预览窗（三态）：auto = [now-1h, now]；follow/lock = center±30min
 const winWindow = computed(() => {
   const t = timeline.value
   const nowSec = t.now - t.start
   let winStart: number, winEnd: number
   if (winMode.value === 'auto' || winCenter.value === null) {
-    const lastAt = Math.min(nowSec, Math.max(0, (phone.value?.last_at ?? t.now) - t.start))
+    // AUTO：窗口正好覆盖已记录数据（最后采样 → 前 1 小时），末尾不留空隙
+    const lastAt = Math.min(nowSec, Math.max(0, (state.value?.last_at ?? t.now) - t.start))
     winEnd = lastAt
     winStart = Math.max(0, winEnd - 3600)
   } else {
     winStart = Math.max(0, winCenter.value - 1800)
+    // 2026-08-08：窗口右边界不超过当前时间（接近/超过 now 的部分不显示未来）
     winEnd = Math.min(nowSec, winCenter.value + 1800)
-    if (winEnd <= winStart) winEnd = winStart + 1
+    if (winEnd <= winStart) winEnd = winStart + 1 // 防零宽
   }
   const segs = t.acts
     .filter((s) => (s.start - t.start) < winEnd && (s.end - t.start) > winStart)
@@ -245,20 +172,26 @@ const winWindow = computed(() => {
       return { ...s, w }
     })
     .sort((a, b) => a.start - b.start)
+  // 窗口内小空隙（<90s，采样断档间隙）并入前段填色，副条连续无灰缝
   const raw: typeof segs = []
   for (const s of segs) {
     const prev = raw[raw.length - 1]
     if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
-      prev.end = s.start
+      prev.end = s.start // 前段只延伸到空隙起点，保留 s
       prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
     }
     raw.push(s)
   }
+  // 2026-08-08：绝对定位（与主条同机制）——flex width% 与主条 left% 解析基准不一致导致错位；累加 left
+  // 2026-08-08b：防御性强制按时间升序重排
+  // 2026-08-08d【真凶】：left 必须是「绝对位置」(s.start-winStart)/窗口宽——不是累加！
+  //   累加会把窗口开头的大段空隙（无数据灰区）挤到末尾 → 副条「先蓝后灰」与主条「先灰后蓝」翻转
   const sorted = [...raw].sort((a, b) => a.start - b.start)
   const filled = sorted.map((s) => {
     const left = Math.max(0, ((s.start - t.start - winStart) / (winEnd - winStart)) * 100)
     return { ...s, left }
   })
+  // 2026-08-08c：副条补画未来黑色段（winEnd 之后到 now 之间的部分主条为黑色——副条同样画黑，不再露灰背景）
   let futureLeft = 0
   let futureW = 0
   if (winEnd > nowSec) {
@@ -268,6 +201,7 @@ const winWindow = computed(() => {
   return { winStart, winEnd, segs: filled, mode: winMode.value, futureLeft, futureW }
 })
 
+// 5 分钟闲置 → 回 auto（30s tick 检查）
 function checkIdleAuto() {
   if (Date.now() - lastInteract > AUTO_IDLE_MS && winMode.value !== 'auto') {
     winMode.value = 'auto'
@@ -276,6 +210,7 @@ function checkIdleAuto() {
   }
 }
 
+// 预览窗未 hover 时的汇总文本（窗口内各类型时长 top3）
 const winSummary = computed(() => {
   const segs = winWindow.value.segs
   if (!segs.length) return '（该时段无记录）'
@@ -298,80 +233,75 @@ function fmtTime(ts: number) {
 }
 function fmtSeg(s: Seg) {
   const dur = fmtMin(s.end - s.start)
-  return `${CAT_LABELS[s.type] ?? s.type} ${fmtTime(s.start)}–${fmtTime(s.end)}（${dur}）${s.label ? ` · ${s.label}` : ''}`
+  const base = `${CAT_LABELS[s.type] ?? s.type} ${fmtTime(s.start)}–${fmtTime(s.end)}（${dur}）`
+  if (s.type === 'multi' && s.detail) {
+    const total = Object.values(s.detail).reduce((a, b) => a + b, 0) || 1
+    const parts = Object.entries(s.detail)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${CAT_LABELS[k] ?? k} ${Math.round((v / total) * 100)}%`)
+    return `${base}\n${parts.join(' · ')}`
+  }
+  return base
 }
 
-let idleTimer: ReturnType<typeof setInterval> | null = null
+async function refresh() {
+  const myVersion = ++refreshVersion
+  loading.value = true
+  try {
+    const raw = await invoke<string>('read_sensor_state')
+    if (myVersion !== refreshVersion) return
+    state.value = raw ? JSON.parse(raw) : null
+    error.value = ''
+    lastTs.value = Date.now()
+  } catch {
+    if (myVersion === refreshVersion) error.value = '本地监测未运行'
+  } finally {
+    if (myVersion === refreshVersion) loading.value = false
+  }
+}
+
+useSyncRefresh(refresh, 30000) // 30s 同步刷新线（setup 顶层订阅，onUnmounted 生效）
+
 onMounted(() => {
-  idleTimer = setInterval(checkIdleAuto, 30000)
+  refresh()
+  setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
 })
-onUnmounted(() => {
-  if (idleTimer) clearInterval(idleTimer)
-})
-
-function refresh() {
-  // 2026-08-08：接口未接，留空（MOCK）；接入后 fetch hub /api/v1/phone-state 写 phone/lastTs
-}
 </script>
 
 <template>
-  <div class="phone-card">
+  <div class="computer-card">
     <div class="head">
       <div class="head-left">
-        <span class="dot" :class="phone && !stale ? 'up' : 'down'" title="手机在线状态（30s 心跳）" />
+        <span class="dot" :class="stale ? 'down' : 'up'" title="手机在线状态（30s 心跳）" />
         <span class="title">📱 手机状态</span>
       </div>
-      <button class="refresh-btn" :disabled="loading || !phone" title="刷新" @click="refresh">⟳</button>
+      <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 
     <div v-if="error" class="unavailable">{{ error }}</div>
 
-    <template v-else-if="phone">
-      <!-- ② 当前应用 -->
+    <template v-else-if="state">
+      <!-- ① 前台进程（检测器在线状态已移到标题栏红绿点） -->
       <ul class="procs">
-        <li v-if="focusRow">
-          <span class="dot focus" />
-          <span class="pname">{{ focusRow.name }}</span>
-          <span class="pcat">{{ CAT_LABELS[focusRow.cat] ?? focusRow.cat }}</span>
+        <li v-for="(r, i) in procRows" :key="i">
+          <span class="dot" :class="r.focus ? 'focus' : 'blur'" />
+          <span class="pname">{{ r.name }}</span>
+          <span class="pcat">{{ CAT_LABELS[r.cat] ?? r.cat }}</span>
         </li>
-        <li v-else class="empty-row">当前应用 —</li>
       </ul>
 
-      <!-- ③ 资源占用条 -->
+      <!-- ② 占用条 -->
       <div class="bars">
         <div v-for="b in resourceBars" :key="b.label" class="bar-row">
           <span class="bar-label">{{ b.label }}</span>
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
-          <span class="bar-val">{{ b.pct }}%{{ b.sub ? ' ' + b.sub : '' }}</span>
+          <span class="bar-val">{{ b.pct }}%</span>
         </div>
       </div>
 
-      <!-- 手机特有：勿扰 / 网络 / 位置 -->
-      <div class="grid">
-        <div
-          v-for="b in basics"
-          :key="b.label"
-          class="cell"
-          :class="{ clickable: b.toggle || b.track }"
-          @click="b.toggle ? toggleDnd() : b.track ? toggleTrack() : null"
-        >
-          <span class="c-label">{{ b.label }}</span>
-          <span class="c-right">
-            <span class="c-val">{{ b.value }}</span>
-            <span v-if="b.toggle" class="switch" :class="(dndOverride ?? phone.dnd) ? 'on' : 'off'">⌁</span>
-            <span v-else-if="b.track" class="track-btn">{{ showTrack ? '▲' : '📍' }}</span>
-          </span>
-        </div>
-      </div>
-
-      <div v-if="showTrack" class="track-panel">
-        <div v-if="phone.track?.length" class="track-hint">轨迹 {{ phone.track.length }} 点（点击打开地图）</div>
-        <div v-else class="track-hint">暂无轨迹数据</div>
-      </div>
-
-      <!-- ④ 圆环 + 图例 -->
+      <!-- ③ 圆环 + 图例 -->
       <div class="ring-block">
-        <div class="ring" :style="ringItems.total ? { background: `conic-gradient(${ringItems.items.map((it, idx) => `${CAT_COLORS[it.k] ?? '#888'} ${idx === 0 ? 0 : ringItems.items.slice(0, idx).reduce((a, x) => a + x.pct, 0) * 100}% ${ringItems.items.slice(0, idx + 1).reduce((a, x) => a + x.pct, 0) * 100}%`).join(',')})` } : { background: '#333' }">
+        <div class="ring" :style="{ background: ringItems.total ? `conic-gradient(${ringItems.items.map((it, idx) => `${CAT_COLORS[it.k] ?? '#888'} ${idx === 0 ? 0 : ringItems.items.slice(0, idx).reduce((a, x) => a + x.pct, 0) * 100}% ${ringItems.items.slice(0, idx + 1).reduce((a, x) => a + x.pct, 0) * 100}%`).join(',')})` : '#333' }">
           <div class="ring-hole">{{ ringTotal.v }}<small>{{ ringTotal.unit }}</small></div>
         </div>
         <ul class="legend">
@@ -384,9 +314,10 @@ function refresh() {
         </ul>
       </div>
 
-      <!-- ⑤ 活动条 + 三态预览窗 -->
+      <!-- ④ 本日活动条 + 常显预览窗（三态：最近1h/跟随/锁定） -->
       <div class="timeline-wrap">
         <div ref="barEl" class="timeline" @mousemove="onBarMove" @click="onBarClick" @mouseleave="onBarLeave">
+          <!-- 当前窗口在主条上的边界高亮 -->
           <div
             class="hover-mask"
             :style="{
@@ -398,16 +329,26 @@ function refresh() {
             v-for="(s, i) in timeline.acts"
             :key="i"
             class="tseg"
+            :class="s.type"
             :style="{
               left: ((s.start - timeline.start) / timeline.total) * 100 + '%',
               width: timeline.widths[i] + '%',
               background: CAT_COLORS[s.type] ?? '#888',
             }"
           />
-          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ left: ((timeline.now - timeline.start) / timeline.total) * 100 + '%', width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
+          <!-- 未来时段（now → 24:00）黑色 -->
+          <div
+            v-if="timeline.now < timeline.end"
+            class="tseg future"
+            :style="{
+              left: ((timeline.now - timeline.start) / timeline.total) * 100 + '%',
+              width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%',
+            }"
+          />
         </div>
         <div class="tlabel"><span>0:00</span><span>24:00</span></div>
 
+        <!-- 预览窗（常显） -->
         <div class="zoom">
           <div class="zoom-head">
             <span>{{ fmtTime(timeline.start + winWindow.winStart) }}–{{ fmtTime(timeline.start + winWindow.winEnd) }}</span>
@@ -422,21 +363,24 @@ function refresh() {
               :style="{ left: s.left + '%', width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
             />
+            <!-- 2026-08-08c：副条未来黑色段（与主条 future 一致） -->
             <div v-if="winWindow.futureW > 0" class="zseg future" :style="{ left: winWindow.futureLeft + '%', width: winWindow.futureW + '%' }" />
           </div>
           <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
       </div>
+
+      <div class="foot">
+        更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }} · 坐 {{ sitting }} 分钟
+      </div>
     </template>
 
-    <div v-else class="unavailable">手机端待接入</div>
-
-    <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }} · 屏幕 {{ phone?.screen_today_min != null ? phone.screen_today_min + ' 分钟' : '—' }}</div>
+    <div v-else class="unavailable">暂未获取到本地状态</div>
   </div>
 </template>
 
 <style scoped>
-.phone-card {
+.computer-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -444,297 +388,83 @@ function refresh() {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.head-left { display: flex; align-items: center; gap: 6px; }
+.title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.refresh-btn {
+  background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 6px;
 }
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+.refresh-btn:hover { color: var(--accent-strong); border-color: var(--border-accent); }
+.refresh-btn:disabled { opacity: 0.5; cursor: default; }
+.unavailable { font-size: 11px; color: var(--text-muted); padding: 6px 0; }
+
+.procs { list-style: none; margin: 0 0 8px; padding: 0; }
+.procs li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot.focus { background: #22c55e; }
+.dot.blur { background: #3b82f6; }
 .dot.up { background: #22c55e; }
 .dot.down { background: #ef4444; }
-.dot.focus { background: #22c55e; }
-.title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.refresh-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-}
-.refresh-btn:disabled { opacity: 0.4; cursor: default; }
-.unavailable {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 6px 0;
-}
-.procs {
-  list-style: none;
-  margin: 0 0 8px;
-  padding: 0;
-}
-.procs li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 0;
-}
-.procs .pname {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.procs .pcat {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.empty-row {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.bars {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.bar-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.bar-label { width: 30px; font-size: 10px; color: var(--text-muted); }
-.bar {
-  flex: 1;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--bg-surface, rgba(0, 0, 0, 0.3));
-  overflow: hidden;
-}
-.bar-fill { height: 100%; border-radius: 3px; background: var(--accent, #06b6d4); }
-.bar-val {
-  width: 74px;
-  text-align: right;
-  font-size: 10px;
-  color: var(--text-muted);
-  font-family: 'Courier New', monospace;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px 10px;
-  margin-bottom: 8px;
-}
-.cell {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-surface, rgba(0, 0, 0, 0.2));
-  border-radius: 6px;
-  padding: 4px 8px;
-}
-.cell.clickable { cursor: pointer; }
-.cell.clickable:hover { background: var(--bg-surface, rgba(255, 255, 255, 0.06)); }
-.c-label {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.c-right {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-.c-val {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-family: 'Courier New', monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.switch {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  border: 1px solid var(--border-main);
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-.switch.on { background: #22c55e; border-color: #22c55e; color: #fff; }
-.switch.off { background: transparent; }
-.track-btn { font-size: 10px; }
-.track-panel {
-  margin-bottom: 8px;
-  padding: 6px 8px;
-  background: var(--bg-surface, rgba(0, 0, 0, 0.2));
-  border-radius: 6px;
-}
-.track-hint {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.ring-block {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 8px 0;
-}
+.pname { color: var(--text-primary); }
+.pcat { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
+
+.bars { margin: 0 0 8px; }
+.bar-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.bar-label { width: 40px; font-size: 11px; color: var(--text-tertiary); }
+.bar { flex: 1; height: 6px; background: var(--border-subtle); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.bar-val { width: 34px; text-align: right; font-size: 11px; font-family: 'Courier New', monospace; }
+
+.ring-block { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; }
 .ring {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  width: 72px; height: 72px; border-radius: 50%; position: relative; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
 }
 .ring-hole {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  margin: 6px auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: 'Courier New', monospace;
+  width: 48px; height: 48px; border-radius: 50%; background: var(--bg-elevated);
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: var(--text-primary);
 }
-.ring-hole small {
-  font-size: 8px;
-  color: var(--text-tertiary, var(--text-muted));
-  margin-left: 1px;
-  font-weight: 400;
-}
-.legend {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.legend li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-}
-.legend .empty { color: var(--text-muted); }
-.swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-.lk { flex: 1; color: var(--text-secondary); }
-.lv { color: var(--text-muted); font-family: 'Courier New', monospace; }
-.timeline {
-  position: relative;
-  height: 12px;
-  border-radius: 3px;
-  background: #333;
-  overflow: hidden;
-  cursor: pointer;
-}
-.tseg {
-  position: absolute;
-  top: 0;
-  height: 100%;
-}
-.tseg.future { background: #000 !important; }
+.ring-hole small { font-size: 9px; color: var(--text-tertiary); margin-left: 2px; font-weight: 400; }
+.legend { list-style: none; margin: 0; padding: 0; flex: 1; }
+.legend li { display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 11px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.lk { color: var(--text-secondary); }
+.lv { margin-left: auto; color: var(--text-tertiary); font-family: 'Courier New', monospace; }
+.legend .empty { color: var(--text-tertiary); }
+
+.timeline-wrap { margin: 6px 0 4px; position: relative; }
+.timeline { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: #333; position: relative; }
 .hover-mask {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border: 1px solid #fff;
-  background: rgba(255, 255, 255, 0.12);
-  z-index: 2;
-  pointer-events: none;
-  border-radius: 3px;
+  position: absolute; top: 0; bottom: 0; z-index: 2;
+  border: 1.5px solid #fff; background: rgba(255, 255, 255, 0.15); border-radius: 3px;
+  pointer-events: none; box-sizing: border-box;
 }
-.tlabel {
-  display: flex;
-  justify-content: space-between;
-  font-size: 9px;
-  color: var(--text-muted);
-  margin-top: 2px;
+.tseg { position: absolute; top: 0; height: 100%; }
+.tseg.empty { opacity: 0.3; }
+.tseg.future { background: #000 !important; }
+.tlabel { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-tertiary); margin-top: 2px; font-family: 'Courier New', monospace; }
+.tooltip {
+  position: absolute; top: 16px; left: 0; right: 0; z-index: 5;
+  background: rgba(0, 0, 0, 0.85); color: #eee; font-size: 10px; padding: 4px 8px;
+  border-radius: 6px; white-space: pre-line; line-height: 1.4;
 }
+/* A：hover 放大浮层（±30 分钟窗） */
 .zoom {
-  margin-top: 6px;
-  background: var(--bg-surface, rgba(0, 0, 0, 0.25));
-  border-radius: 6px;
-  padding: 6px 8px;
+  margin-top: 6px; background: var(--bg-surface, rgba(0, 0, 0, 0.4)); border: 1px solid var(--border-subtle);
+  border-radius: 6px; padding: 6px 8px;
 }
-.zoom-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 9px;
-  color: var(--text-muted);
-}
-.zoom-mode {
-  font-size: 9px;
-  color: var(--text-tertiary, var(--text-muted));
-}
-.zoom-mode.follow { color: var(--accent, #06b6d4); }
-.zoom-mode.lock { color: #eab308; }
-.zoom-back {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 10px;
-  padding: 0 2px;
-}
-.zoom-bar {
-  position: relative;
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: #3a3a3a;
-  margin-top: 4px;
-  overflow: hidden;
-}
-.zseg {
-  position: absolute;
-  top: 0;
-  height: 100%;
-}
+.zoom-head { font-size: 10px; color: var(--text-tertiary); margin-bottom: 4px; font-family: 'Courier New', monospace; display: flex; align-items: center; gap: 6px; }
+.zoom-mode { font-size: 9px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border-subtle); font-family: inherit; }
+.zoom-mode.auto { color: var(--text-muted); }
+.zoom-mode.follow { color: var(--accent-strong); border-color: var(--accent); }
+.zoom-mode.lock { color: #c07a1f; border-color: #c07a1f; }
+.zoom-back { margin-left: auto; border: 1px solid var(--border-subtle); background: none; color: var(--text-muted); border-radius: 4px; font-size: 10px; cursor: pointer; padding: 0 4px; }
+.zoom-back:hover { color: var(--accent-strong); border-color: var(--accent); }
+.zoom-bar { position: relative; display: block; height: 14px; border-radius: 3px; overflow: hidden; background: #3a3a3a; }
+.zseg { position: absolute; top: 0; height: 100%; }
 .zseg.future { background: #000 !important; }
-.zoom-detail {
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--text-secondary);
-  white-space: pre-line;
-  line-height: 1.4;
-}
-.foot {
-  margin-top: 8px;
-  font-size: 9px;
-  color: var(--text-muted);
-  font-family: 'Courier New', monospace;
-}
+.zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
+
+.foot { margin-top: 8px; font-size: 9px; color: var(--text-muted); font-family: 'Courier New', monospace; }
 </style>
