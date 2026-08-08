@@ -218,12 +218,16 @@ fn phone_command(action: String) -> Result<String, String> {
             let _ = std::process::Command::new("explorer").arg(dest).spawn();
             Ok(format!("opened:{dest}"))
         }
-        // 一键投屏：scrcpy（需主电脑已安装 scrcpy）
+        // 一键投屏：scrcpy（已安装到 E:\AI\scrcpy）
         "scrcpy" => {
-            let _ = std::process::Command::new("scrcpy")
+            let scrcpy = r"E:\AI\scrcpy\scrcpy-win64-v3.2\scrcpy.exe";
+            if !std::path::Path::new(scrcpy).exists() {
+                return Err("scrcpy 未安装（E:\\AI\\scrcpy 下找不到）".into());
+            }
+            let _ = std::process::Command::new(scrcpy)
                 .args(["-s", PHONE_DEV])
                 .spawn()
-                .map_err(|e| format!("scrcpy 启动失败（未安装？）: {e}"))?;
+                .map_err(|e| format!("scrcpy 启动失败: {e}"))?;
             Ok("scrcpy started".into())
         }
         // 手电筒：华为无系统 torch 命令，需手机端 App/Shizuku 实现
