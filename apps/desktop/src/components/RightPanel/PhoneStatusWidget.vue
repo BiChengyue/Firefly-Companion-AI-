@@ -40,6 +40,8 @@ interface PhoneState {
   track?: Array<{ t: number; lat: number; lng: number }>  // 当天轨迹（低频）
   focus_app?: { name: string; cat: string } | null        // 当前应用
   screen_today_min?: number                   // 今日屏幕使用分钟
+  volume_music?: number                       // 媒体音量（2026-08-08：App 上报，重做音量系统）
+  volume_ring?: number                        // 铃声音量
   today_activities?: Seg[]
   today_categories?: Record<string, number>
 }
@@ -136,6 +138,11 @@ const resourceBars = computed(() => {
     // 电量三态 emoji：🔌有线充电 / ⚡无线充电 / 🔋未充电
     const emoji = !p.charging?.active ? '🔋' : (p.charging.method === 'wired' ? '🔌' : '⚡')
     bars.push({ label: `电量${emoji}`, pct: p.battery ?? 0 })
+    // 2026-08-08：重做音量系统——App 上报真实媒体音量（0-15），设置走 App AudioManager
+    if (p.volume_music != null) {
+      const v = Math.max(0, Math.min(15, p.volume_music))
+      bars.push({ label: `🔊 音量${v === 0 ? '🔇' : ''}`, pct: Math.round((v / 15) * 100) })
+    }
   }
   return bars
 })
@@ -327,6 +334,8 @@ function refresh() {
       phone.value = {
         last_at: st.at ?? Date.now() / 1000,
         battery: st.battery,
+        volume_music: (st.raw as any)?.volume_music,
+        volume_ring: (st.raw as any)?.volume_ring,
         charging: { active: !!r.charging, method: 'wireless' },
         cpu_pct: undefined,
         ram_pct: r.ram_pct,
