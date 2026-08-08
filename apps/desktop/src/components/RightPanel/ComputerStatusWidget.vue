@@ -101,12 +101,8 @@ const timeline = computed(() => {
   const start = t0.getTime() / 1000
   const end = start + 86400
   const now = Date.now() / 1000
-  // B：短段保底 2.5px，总宽超 98% 时等比压缩
-  const natural = acts.map((s) => ((s.end - s.start) / 86400) * 100)
-  const padded = natural.map((w) => Math.max(w, 2.5))
-  const sum = padded.reduce((a, b) => a + b, 0)
-  const scale = sum > 98 ? 98 / sum : 1
-  const widths = acts.map((_, i) => padded[i] * scale)
+  // 全真实比例（不保底）——保证 hover-mask/主条/放大窗严格线性对应
+  const widths = acts.map((s) => ((s.end - s.start) / 86400) * 100)
   return { acts, start, end, total: 86400, now, widths }
 })
 // A：hover 时间定位——x 坐标 → 当天秒数 → 命中段
@@ -132,11 +128,6 @@ const hoverWindow = computed(() => {
       const w = ((Math.min(s.end, timeline.value.start + winEnd) - Math.max(s.start, timeline.value.start + winStart)) / (winEnd - winStart)) * 100
       return { ...s, w }
     })
-  // 保底 6px，总宽超 100% 时等比压缩（保持与主条高亮窗内段的相对比例）
-  const padded = segs.map((s) => Math.max(s.w, 6))
-  const sum = padded.reduce((a, b) => a + b, 0)
-  const scale = sum > 100 ? 100 / sum : 1
-  segs = segs.map((s, i) => ({ ...s, w: padded[i] * scale }))
   return { winStart, winEnd, segs }
 })
 
