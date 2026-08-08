@@ -29,9 +29,47 @@ interface PhoneState {
   today_categories?: Record<string, number>   // 今日分类时长秒（圆环）
 }
 
-const phone = ref<PhoneState | null>(null)   // 2026-08-08：接口未接，恒 null → 显示占位
+/** 2026-08-08：MOCK 数据——接口未接，先用模拟数据把 UI 完整渲染出来；
+ *  手机端接入后：删掉初始 mock，在 refresh() 里 fetch hub /api/v1/phone-state 写 phone/lastTs */
+function mockActivities(): Seg[] {
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+  const base = t0.getTime() / 1000
+  const now = Date.now() / 1000
+  const plan: Array<[number, number, string, string?]> = [
+    [8 * 3600, 8 * 3600 + 1500, 'social', '微信'],
+    [8 * 3600 + 1500, 9 * 3600 + 600, 'video', '哔哩哔哩'],
+    [10 * 3600, 11 * 3600, 'game', '原神'],
+    [11 * 3600, 12 * 3600, 'social', 'QQ'],
+    [12 * 3600, 13 * 3600, 'rest', undefined],
+    [13 * 3600, 14 * 3600 + 900, 'reading', '番茄小说'],
+    [15 * 3600, 16 * 3600, 'tool', '文件管理'],
+    [16 * 3600, 17 * 3600, 'social', '微信'],
+  ]
+  return plan
+    .filter(([s]) => base + s < now)
+    .map(([s, e, t, l]) => ({ start: base + s, end: Math.min(base + e, now), type: t, ...(l ? { label: l } : {}) }))
+}
+const mockTrack: TrackPt[] = [
+  { t: Date.now() / 1000 - 8 * 3600, lat: 31.2304, lng: 121.4737 },
+  { t: Date.now() / 1000 - 7 * 3600, lat: 31.231, lng: 121.474 },
+  { t: Date.now() / 1000 - 6 * 3600, lat: 31.232, lng: 121.4745 },
+  { t: Date.now() / 1000 - 5 * 3600, lat: 31.233, lng: 121.475 },
+]
+
+const phone = ref<PhoneState | null>({
+  last_at: Date.now() / 1000,
+  battery: 87,
+  charging: { active: true, method: 'wireless' },
+  dnd: true,
+  network: { kind: 'wifi', ssid: '我家WiFi' },
+  loc_bucket: 'home',
+  track: mockTrack,
+  focus_app: { name: '微信', cat: 'social' },
+  today_activities: mockActivities(),
+  today_categories: { social: 7800, video: 4200, game: 3600, reading: 5400, rest: 3600, tool: 3600 },
+})
+const lastTs = ref(Date.now())
 const error = ref('')
-const lastTs = ref(0)
 const loading = ref(false)
 
 /** 勿扰开关（本地 UI；未来调 bus 下发指令到手机） */
