@@ -42,10 +42,6 @@ const PHONE_CAT_LABELS: Record<string, string> = {
   social: '社交', video: '影音', game: '游戏', shopping: '购物',
   tool: '工具', reading: '阅读', unknown: '其他', rest: '休息',
 }
-const PHONE_CAT_COLORS: Record<string, string> = {
-  social: '#a855f7', video: '#ef4444', game: '#f97316', shopping: '#ec4899',
-  tool: '#94a3b8', reading: '#06b6d4', unknown: '#64748b', rest: '#22c55e',
-}
 
 const LOC_LABELS: Record<string, string> = { home: '家', work: '公司', out: '外出' }
 const NET_LABELS: Record<string, string> = { wifi: 'Wi-Fi', mobile: '蜂窝', offline: '离线' }
