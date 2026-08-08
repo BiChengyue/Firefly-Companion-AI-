@@ -76,6 +76,28 @@ class MemoryFacade:
             namespace=namespace,
         )
 
+    async def save_memory(
+        self,
+        mem_type: str,
+        content: str,
+        mode: str = "daily",
+        confidence: float = 0.0,
+    ) -> bool:
+        """兼容旧调用签名（T-30 修复：chat.py promise 提醒写入）。
+
+        结构化记忆写入：mode → namespace（daily→daily_life、work→work_tasks、其它→shared_profile），
+        走 write_long_term（置信度门槛 + lore 泄漏拦截 + embedding 落库）。
+        历史调用 `save_memory(type, content, mode, confidence)` 此前因本方法缺失抛
+        AttributeError 被调用方吞掉（promise 从未落库）——补齐后桌宠待办与日报待办板块可用。
+        """
+        ns = "daily_life" if mode == "daily" else ("work_tasks" if mode == "work" else "shared_profile")
+        return await self.personal.write_long_term(
+            content=content,
+            metadata={"type": mem_type},
+            confidence=confidence,
+            namespace=ns,
+        )
+
     @staticmethod
     def _format_memories_for_prompt(recalled: list[dict]) -> str:
         """Phase 13: 将召回的记忆列表格式化为含时效标记的 LLM 注入文本。"""

@@ -792,7 +792,9 @@ async def chat_ws(ws: WebSocket):
                     parsed_rem = parse_chinese_reminder_intent(content)
                     if parsed_rem:
                         try:
-                            memory_manager.save_memory("promise", parsed_rem["text"], mode=mode, confidence=0.95)
+                            # T-30 修复：save_memory 为 async 方法（MemoryFacade），必须 await；
+                            # 缺失时曾静默 AttributeError → promise 从未落库
+                            await memory_manager.save_memory("promise", parsed_rem["text"], mode=mode, confidence=0.95)
                             rem_id = f"r_{int(time.time()*1000)}"
                             await _send_json(ws, {
                                 "type": "reminder_created",

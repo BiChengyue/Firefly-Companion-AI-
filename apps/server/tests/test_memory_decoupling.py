@@ -123,3 +123,29 @@ async def test_memory_facade_compatibility(temp_db_path, monkeypatch):
 
     # 单例导出确认
     assert isinstance(memory_manager, MemoryFacade)
+
+
+@pytest.mark.asyncio
+async def test_save_memory_promise_lands_in_namespace(temp_db_path, monkeypatch):
+    """T-30 修复回归：MemoryFacade.save_memory("promise", ...) 真实落库（此前不存在该方法）。
+
+    - daily 模式 → daily_life 命名空间（桌面端/日报待办板块读 daily 即见）
+    - work 模式 → work_tasks 命名空间
+    """
+    from app.core import db
+    monkeypatch.setattr(db, "_DEFAULT_DB_PATH", temp_db_path)
+
+    facade = MemoryFacade()
+    ok = await facade.save_memory("promise", "八点吃药 (明天08:00)", mode="daily", confidence=0.95)
+    assert ok is True  # 0.95 > confidence_threshold(0.65)，应写入
+
+    daily = db.query_memories("daily_life")
+    assert any(m["type"] == "promise" and "吃药" in m["content"] for m in daily)
+
+    await facade.save_memory("promise", "九点开会 (明天09:00)", mode="work", confidence=0.95)
+    work = db.query_memories("work_tasks")
+    assert any(m["type"] == "promise" and "开会" in m["content"] for m in work)
+
+    # 低置信度被门槛拦截（不落库）
+    rejected = await facade.save_memory("promise", "随手一句 (明天10:00)", mode="daily", confidence=0.1)
+    assert rejected is False
