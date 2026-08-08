@@ -374,9 +374,9 @@ const trackSvg = computed(() => {
   return { path, dots, w: W, h: H }
 })
 
-/** 2026-08-08：Canvas 瓦片地图——高德匿名瓦片（GCJ-02 与国内定位坐标一致），无 UI，直接标注轨迹 */
+/** 2026-08-08：Canvas 瓦片地图——高德匿名瓦片（GCJ-02 与国内定位坐标一致），无 UI，直接标注轨迹。
+ *  支持缩放（滚轮）与拖动（鼠标拖拽）——2026-08-08b */
 const mapCanvas = ref<HTMLCanvasElement | null>(null)
-const mapZoom = 14
 
 function lngLatToTile(lng: number, lat: number, z: number) {
   const n = 2 ** z
@@ -385,70 +385,120 @@ function lngLatToTile(lng: number, lat: number, z: number) {
   const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
   return { x, y }
 }
+function tileUrl(tx: number, ty: number, z: number): string {
+  const s = ((tx + ty) % 4 + 4) % 4
+  return `https://webrd0${s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${tx}&y=${ty}&z=${z}`
+}
 
-function drawTrackMap() {
-  const canvas = mapCanvas.value
+/** 地图视图状态：中心瓦片浮点坐标 + zoom */
+const mapView = ref({ z: 14, x: 0, y: 0 })
+let mapDrag = false
+let mapDragStart = { x: 0, y: 0, vx: 0, vy: 0 }
+let mapRenderQueued = false
+
+function initMapView() {
   const pts = phone.value?.track ?? []
+  if (!pts.length) return
+  const last = pts[pts.length - 1]
+  const c = lngLatToTile(last.lng, last.lat, mapView.value.z)
+  mapView.value = { z: mapView.value.z, x: c.x, y: c.y }
+}
+
+function drawTrackLayer(ctx: CanvasRenderingContext2D, z: number, cx: number, cy: number) {
+  const pts = phone.value?.track ?? []
+  const canvas = mapCanvas.value
   if (!canvas || pts.length < 1) return
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
   const TILE = 256
   const W = canvas.width
   const H = canvas.height
-  const Z = mapZoom
-  const last = pts[pts.length - 1]
-  const c = lngLatToTile(last.lng, last.lat, Z)
-  const tx0 = Math.floor(c.x)
-  const ty0 = Math.floor(c.y)
-  // 中心点在画布的位置（把中心瓦片放到画布中心）
-  const cxPx = W / 2
-  const cyPx = H / 2
-  const offX = (c.x - tx0) * TILE
-  const offY = (c.y - ty0) * TILE
-  const drawTile = (dx: number, dy: number) => {
-    const img = new Image()
-    const tx = tx0 + dx
-    const ty = ty0 + dy
-    img.onload = () => {
-      ctx.drawImage(img, cxPx - offX + dx * TILE, cyPx - offY + dy * TILE)
-    }
-    img.src = `https://webrd0${((tx + ty) % 4 + 4) % 4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${tx}&y=${ty}&z=${Z}`
+  const toPx = (lng: number, lat: number) => {
+    const t = lngLatToTile(lng, lat, z)
+    return { x: W / 2 + (t.x - cx) * TILE, y: H / 2 + (t.y - cy) * TILE }
   }
-  // 铺 3x3 瓦片覆盖画布
-  const span = Math.ceil(W / TILE / 2) + 1
+  ctx.beginPath()
+  pts.forEach((p, i) => {
+    const px = toPx(p.lng, p.lat)
+    if (i === 0) ctx.moveTo(px.x, px.y)
+    else ctx.lineTo(px.x, px.y)
+  })
+  ctx.strokeStyle = '#06b6d4'
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+  pts.forEach((p, i) => {
+    const px = toPx(p.lng, p.lat)
+    ctx.beginPath()
+    ctx.arc(px.x, px.y, i === 0 || i === pts.length - 1 ? 4 : 2.5, 0, Math.PI * 2)
+    ctx.fillStyle = i === 0 ? '#22c55e' : (i === pts.length - 1 ? '#ef4444' : '#ffffff')
+    ctx.fill()
+  })
+}
+
+function renderMap() {
+  const canvas = mapCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const { z, x, y } = mapView.value
+  const TILE = 256
+  const W = canvas.width
+  const H = canvas.height
+  ctx.clearRect(0, 0, W, H)
+  const tx0 = Math.floor(x)
+  const ty0 = Math.floor(y)
+  const offX = (x - tx0) * TILE
+  const offY = (y - ty0) * TILE
+  const span = Math.ceil(Math.max(W, H) / TILE / 2) + 1
+  let pending = 0
+  const onLoaded = (img: HTMLImageElement, dx: number, dy: number) => {
+    ctx.drawImage(img, W / 2 - offX + dx * TILE, H / 2 - offY + dy * TILE)
+    pending--
+    if (pending === 0) drawTrackLayer(ctx, z, x, y)
+  }
   for (let dx = -span; dx <= span; dx++) {
     for (let dy = -span; dy <= span; dy++) {
-      drawTile(dx, dy)
+      const img = new Image()
+      img.onload = () => onLoaded(img, dx, dy)
+      pending++
+      img.src = tileUrl(tx0 + dx, ty0 + dy, z)
     }
   }
-  // 等瓦片加载后画轨迹（onload 触发绘制；这里用 setTimeout 兜底，瓦片加载完由 onload 画）
-  // 轨迹线：GCJ-02 → 画布像素
-  const toPx = (lng: number, lat: number) => {
-    const t = lngLatToTile(lng, lat, Z)
-    return {
-      x: cxPx + (t.x - c.x) * TILE,
-      y: cyPx + (t.y - c.y) * TILE,
-    }
+  if (pending === 0) drawTrackLayer(ctx, z, x, y)
+}
+
+function queueRender() {
+  if (mapRenderQueued) return
+  mapRenderQueued = true
+  requestAnimationFrame(() => {
+    mapRenderQueued = false
+    renderMap()
+  })
+}
+
+function mapMouseDown(e: MouseEvent) {
+  mapDrag = true
+  mapDragStart = { x: e.clientX, y: e.clientY, vx: mapView.value.x, vy: mapView.value.y }
+}
+function mapMouseMove(e: MouseEvent) {
+  if (!mapDrag) return
+  const TILE = 256
+  const dz = 2 ** mapView.value.z
+  mapView.value = {
+    ...mapView.value,
+    x: mapDragStart.vx - ((e.clientX - mapDragStart.x) / TILE) / dz,
+    y: mapDragStart.vy - ((e.clientY - mapDragStart.y) / TILE) / dz,
   }
-  window.setTimeout(() => {
-    ctx.beginPath()
-    pts.forEach((p, i) => {
-      const px = toPx(p.lng, p.lat)
-      if (i === 0) ctx.moveTo(px.x, px.y)
-      else ctx.lineTo(px.x, px.y)
-    })
-    ctx.strokeStyle = '#06b6d4'
-    ctx.lineWidth = 2.5
-    ctx.stroke()
-    // 轨迹点
-    pts.forEach((p, i) => {
-      const px = toPx(p.lng, p.lat)
-      ctx.beginPath()
-      ctx.arc(px.x, px.y, i === 0 || i === pts.length - 1 ? 4 : 2.5, 0, Math.PI * 2)
-      ctx.fillStyle = i === 0 ? '#22c55e' : (i === pts.length - 1 ? '#ef4444' : '#ffffff')
-      ctx.fill()
-    })
-  }, 400)
+  queueRender()
+}
+function mapMouseUp() {
+  mapDrag = false
+}
+function mapWheel(e: WheelEvent) {
+  e.preventDefault()
+  const dz = e.deltaY < 0 ? 1 : -1
+  const nz = Math.min(19, Math.max(5, mapView.value.z + dz))
+  if (nz === mapView.value.z) return
+  mapView.value = { ...mapView.value, z: nz }
+  queueRender()
 }
 
 onMounted(() => {
@@ -456,7 +506,12 @@ onMounted(() => {
   setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
 })
 watch(showTrack, (v) => {
-  if (v) window.setTimeout(() => drawTrackMap(), 120) // 等 canvas 挂载后绘制瓦片地图
+  if (v) {
+    window.setTimeout(() => {
+      initMapView()
+      renderMap()
+    }, 120) // 等 canvas 挂载后初始化视图并绘制
+  }
 })
 </script>
 
@@ -509,13 +564,18 @@ watch(showTrack, (v) => {
 
       <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
       <div v-if="showTrack" class="track-panel">
-        <div class="track-head">🗺️ 今日轨迹</div>
+        <div class="track-head">🗺️ 今日轨迹 <span class="track-tip">滚轮缩放 · 拖动平移</span></div>
         <canvas
           v-if="phone?.track?.length"
           ref="mapCanvas"
           class="track-map"
           width="260"
           height="140"
+          @mousedown="mapMouseDown"
+          @mousemove="mapMouseMove"
+          @mouseup="mapMouseUp"
+          @mouseleave="mapMouseUp"
+          @wheel.prevent="mapWheel"
         />
         <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
           <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
@@ -692,6 +752,10 @@ watch(showTrack, (v) => {
   font-size: 10px;
   color: var(--text-secondary);
   margin-bottom: 4px;
+}
+.track-tip {
+  font-size: 9px;
+  color: var(--text-tertiary, var(--text-muted));
 }
 .track-map-link {
   color: var(--accent, #06b6d4);
