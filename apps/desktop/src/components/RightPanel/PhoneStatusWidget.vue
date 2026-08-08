@@ -22,6 +22,27 @@ interface SensorState {
 }
 
 const state = ref<SensorState | null>(null)
+
+/** 2026-08-08：手机活动条数据源（MOCK）——接口未接，先用模拟手机活动段渲染；接入后 fill refresh() */
+function phoneMockActivities(): Seg[] {
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+  const base = t0.getTime() / 1000
+  const now = Date.now() / 1000
+  const plan: Array<[number, number, string, string?]> = [
+    [8 * 3600, 8 * 3600 + 1500, 'social', '微信'],
+    [8 * 3600 + 1500, 9 * 3600 + 600, 'video', '哔哩哔哩'],
+    [10 * 3600, 11 * 3600, 'game', '云·星穹铁道'],
+    [11 * 3600, 12 * 3600, 'social', 'QQ'],
+    [12 * 3600, 13 * 3600, 'rest', undefined],
+    [13 * 3600, 14 * 3600 + 900, 'reading', '知乎'],
+    [15 * 3600, 16 * 3600, 'tool', '甲壳虫ADB'],
+    [16 * 3600, 17 * 3600, 'social', '微信'],
+  ]
+  return plan
+    .filter(([s]) => base + s < now)
+    .map(([s, e, t, l]) => ({ start: base + s, end: Math.min(base + e, now), type: t, ...(l ? { label: l } : {}) }))
+}
+const phone = ref<{ last_at?: number; today_activities?: Seg[] }>({ last_at: Date.now() / 1000, today_activities: phoneMockActivities() })
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
@@ -106,8 +127,9 @@ const ringItems = computed(() => {
 })
 // 活动条（0:00 → 24:00 全长，未来时段黑色）
 const timeline = computed(() => {
+  // 2026-08-08：活动条数据源改手机（phone.today_activities 优先）；配色已换手机分类色
   // 过滤零宽段 + 离线段（offline 当无记录显示，不占数据段）
-  const acts = (state.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
+  const acts = (phone.value?.today_activities ?? state.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
   const start = t0.getTime() / 1000
   const end = start + 86400
@@ -167,7 +189,7 @@ const winWindow = computed(() => {
   let winStart: number, winEnd: number
   if (winMode.value === 'auto' || winCenter.value === null) {
     // AUTO：窗口正好覆盖已记录数据（最后采样 → 前 1 小时），末尾不留空隙
-    const lastAt = Math.min(nowSec, Math.max(0, (state.value?.last_at ?? t.now) - t.start))
+    const lastAt = Math.min(nowSec, Math.max(0, ((phone.value?.last_at ?? state.value?.last_at) ?? t.now) - t.start))
     winEnd = lastAt
     winStart = Math.max(0, winEnd - 3600)
   } else {
