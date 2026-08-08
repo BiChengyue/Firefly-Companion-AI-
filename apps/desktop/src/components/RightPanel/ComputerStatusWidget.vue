@@ -338,7 +338,6 @@ onMounted(() => {
               class="zseg"
               :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
-              @mouseleave="hoverSeg = null"
             />
           </div>
           <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
