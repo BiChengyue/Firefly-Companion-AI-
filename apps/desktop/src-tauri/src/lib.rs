@@ -5,6 +5,7 @@ mod tray;
 mod window;
 
 use tauri::Manager;
+use std::sync::Mutex;
 
 /// 读桌宠总线 token 配置文件（T-20 切单轨配套，2026-08-06；T-27 B 补兜底路径）
 /// 路径优先级：
@@ -124,6 +125,31 @@ fn run_cmd(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// 找手机状态：Some(找手机前的媒体音量) = 正在响铃中（待还原）。25s 自动还原或再点一次立即停止。
+static FIND_PHONE_STATE: Mutex<Option<i32>> = Mutex::new(None);
+
+/// 读当前媒体音量（STREAM_MUSIC streamVolume，0-15）
+fn phone_media_volume() -> Option<i32> {
+    let out = phone_adb_shell(&["dumpsys", "audio"]).ok()?;
+    let idx = out.find("STREAM_MUSIC:")?;
+    let rest = &out[idx..];
+    let line = rest.lines().find(|l| l.contains("streamVolume"))?;
+    line.split(':').nth(1)?.trim().parse::<i32>().ok()
+}
+
+/// 按键把媒体音量调到目标值（华为 settings put 不同步 AudioService，只能按键）
+fn phone_set_media_volume(target: i32) {
+    if let Some(cur) = phone_media_volume() {
+        let diff = (cur - target).abs();
+        if diff > 0 {
+            let key = if cur > target { "25" } else { "24" }; // VOLUME_DOWN / VOLUME_UP
+            let _ = phone_adb_shell(&[
+                "sh", "-c", &format!("for i in $(seq 1 {diff}); do input keyevent {key}; done"),
+            ]);
+        }
+    }
+}
+
 #[tauri::command]
 fn phone_command(action: String) -> Result<String, String> {
     // 先确保 adb 无线连接
@@ -160,10 +186,27 @@ fn phone_command(action: String) -> Result<String, String> {
                 Ok("vibrate".into())
             }
         }
-        // 找手机：媒体音量拉满（settings put 在华为不同步 AudioService，必须按键注入调 STREAM_MUSIC）+ 播放铃声
+        // 找手机：toggle。第一次点 = 记录原音量 + 拉满播放；再点 = 停止播放 + 还原音量；25s 后自动还原。
         "find_phone" => {
+            // 已在响 → 立即停止并还原
+            let mut st = FIND_PHONE_STATE.lock().unwrap();
+            if let Some(prev) = *st {
+                let _ = shell(&["am", "force-stop", "com.huawei.music.local"]);
+                phone_set_media_volume(prev);
+                *st = None;
+                return Ok("find_phone stopped: 已停止并还原音量".into());
+            }
+            // 记录当前媒体音量（还原目标）
+            let prev = phone_media_volume();
+            *st = prev;
+            // 音量拉满（按键注入调 STREAM_MUSIC）
             let _ = shell(&["settings", "put", "system", "volume_music", "15"]);
             let _ = shell(&["sh", "-c", "for i in $(seq 1 15); do input keyevent 24; done"]);
+            // 发通知提示（shell 通知无法绑定点击动作——停止靠桌宠再点一次或 25s 自动还原）
+            let _ = shell(&[
+                "cmd", "notification", "post", "-S", "bigtext", "-t", "📢 找手机响铃中",
+                "findphone", "已拉满音量播放铃声。停止：回电脑再点一次🔊按钮，或 25 秒后自动还原音量。",
+            ]);
             // 确保铃声在手机（不存在则从电脑 push，再不行报错提示）
             if shell(&["ls", "/sdcard/Download/findphone.mp3"]).is_err() {
                 let local_ring = r"C:\ProgramData\firefly-bot\findphone.mp3";
@@ -176,7 +219,21 @@ fn phone_command(action: String) -> Result<String, String> {
                 "am", "start", "-a", "android.intent.action.VIEW",
                 "-d", "file:///sdcard/Download/findphone.mp3", "-t", "audio/mp3",
                 "-n", "com.huawei.music.local/com.huawei.music.ui.player.oneshot.MediaPlaybackActivityStarter",
-            ])
+            ])?;
+            // 25s 后自动还原（铃声 20s 播完；若期间用户再点则被上面的立即停止接管）
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(25));
+                let mut g = FIND_PHONE_STATE.lock().unwrap();
+                if let Some(prev) = *g {
+                    phone_set_media_volume(prev);
+                    *g = None;
+                }
+            });
+            Ok(if prev.is_some() {
+                format!("find_phone started: 响铃中（25s 后自动还原音量，或再点一次停止）原音量={prev:?}")
+            } else {
+                "find_phone started: 响铃中（未读到原音量，无自动还原）".into()
+            })
         }
         // 激活 Shizuku
         "shizuku" => shell(&[
