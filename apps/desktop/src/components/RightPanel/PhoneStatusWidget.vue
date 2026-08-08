@@ -1,9 +1,8 @@
 <script setup lang="ts">
-/** 电脑状态卡（A3 v2）— 本地读 sensor state 文件（不走 hub），30s 同步刷新。
- *  布局：①前台进程(焦点绿/非焦点蓝/检测器绿红) ②占用条 ③当日圆环+图例 ④本日活动条 ⑤foot */
+/** 手机状态卡（2026-08-08：基于电脑卡布局，数据源全部改为手机 phone mock）。
+ *  布局：①当前应用 ②占用条(CPU/内存/磁盘/电量) ③当日圆环+图例 ④本日活动条+三态预览窗 ⑤foot(屏幕分钟)。
+ *  接口未接（MOCK 渲染）；接入 hub GET /api/v1/phone-state 后填 refresh()。 */
 import { ref, computed, onMounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { useSyncRefresh } from '@/composables/useSyncRefresh'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -17,6 +16,24 @@ interface SensorState {
   system_usage?: { cpu?: number; mem?: number; disk?: Record<string, number>; gpu?: number }
   detector_ok?: boolean
   error?: string | null
+  today_activities?: Seg[]
+  today_categories?: Record<string, number>
+}
+
+/** 2026-08-08：手机端数据契约（hub GET /api/v1/phone-state）——手机卡全部数据源 */
+interface PhoneState {
+  last_at?: number                            // 30s 心跳
+  battery?: number                            // 电量 %
+  charging?: { active: boolean; method?: 'wired' | 'wireless' }
+  cpu_pct?: number                            // CPU 占用 %
+  ram_pct?: number                            // 内存占用 %
+  storage_pct?: number                        // 存储占用 %
+  dnd?: boolean                               // 勿扰
+  network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }
+  loc_bucket?: 'home' | 'work' | 'out'        // 位置桶（低频）
+  track?: Array<{ t: number; lat: number; lng: number }>  // 当天轨迹（低频）
+  focus_app?: { name: string; cat: string } | null        // 当前应用
+  screen_today_min?: number                   // 今日屏幕使用分钟
   today_activities?: Seg[]
   today_categories?: Record<string, number>
 }
@@ -42,13 +59,32 @@ function phoneMockActivities(): Seg[] {
     .filter(([s]) => base + s < now)
     .map(([s, e, t, l]) => ({ start: base + s, end: Math.min(base + e, now), type: t, ...(l ? { label: l } : {}) }))
 }
-const phone = ref<{ last_at?: number; today_activities?: Seg[] }>({ last_at: Date.now() / 1000, today_activities: phoneMockActivities() })
+const phone = ref<PhoneState | null>({
+  last_at: Date.now() / 1000,
+  battery: 87,
+  charging: { active: true, method: 'wireless' },
+  cpu_pct: 23,
+  ram_pct: 58,
+  storage_pct: 64,
+  dnd: true,
+  network: { kind: 'wifi', ssid: '我家WiFi' },
+  loc_bucket: 'home',
+  track: [
+    { t: Date.now() / 1000 - 8 * 3600, lat: 31.2304, lng: 121.4737 },
+    { t: Date.now() / 1000 - 7 * 3600, lat: 31.231, lng: 121.474 },
+    { t: Date.now() / 1000 - 6 * 3600, lat: 31.232, lng: 121.4745 },
+    { t: Date.now() / 1000 - 5 * 3600, lat: 31.233, lng: 121.475 },
+  ],
+  focus_app: { name: '微信', cat: 'social' },
+  screen_today_min: 156,
+  today_activities: phoneMockActivities(),
+  today_categories: { social: 7800, video: 4200, game: 3600, reading: 5400, rest: 3600, tool: 3600 },
+})
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
 const hoverSeg = ref<Seg | null>(null)      // 副条 hover 命中的段
 const barEl = ref<HTMLElement | null>(null)
-let refreshVersion = 0
 
 // 预览窗三态：auto（最近1h，常显）/ follow（跟随主条鼠标）/ lock（点击锁定）
 const winMode = ref<'auto' | 'follow' | 'lock'>('auto')
@@ -76,39 +112,33 @@ const CAT_COLORS: Record<string, string> = {
 }
 
 const stale = computed(() => {
-  if (!state.value?.last_at) return false
-  return Date.now() / 1000 - state.value.last_at > 5 * 60
+  if (!phone.value?.last_at) return false
+  return Date.now() / 1000 - phone.value.last_at > 5 * 60
 })
 const sitting = computed(() => {
-  const s = state.value?.sitting_minutes
+  const s = phone.value?.screen_today_min
   return typeof s === 'number' && s >= 1 ? Math.round(s) : 0
 })
-// 占用条（手机卡）：CPU / 内存 / 磁盘 / 电量——显卡换成电量（2026-08-08）
+// 占用条（手机卡）：CPU / 内存 / 磁盘 / 电量（2026-08-08 数据源全改 phone）
 const resourceBars = computed(() => {
-  const u = state.value?.system_usage
-  const bars: Array<{ label: string; pct: number; sub?: string }> = []
-  if (u) {
-    bars.push({ label: 'CPU', pct: u.cpu ?? 0 })
-    bars.push({ label: '内存', pct: u.mem ?? 0 })
-    bars.push({ label: '磁盘', pct: u.disk?.C ?? 0 })
+  const p = phone.value
+  const bars: Array<{ label: string; pct: number }> = []
+  if (p) {
+    bars.push({ label: 'CPU', pct: p.cpu_pct ?? 0 })
+    bars.push({ label: '内存', pct: p.ram_pct ?? 0 })
+    bars.push({ label: '磁盘', pct: p.storage_pct ?? 0 })
+    // 电量三态 emoji：🔌有线充电 / ⚡无线充电 / 🔋未充电
+    const emoji = !p.charging?.active ? '🔋' : (p.charging.method === 'wired' ? '🔌' : '⚡')
+    bars.push({ label: `电量${emoji}`, pct: p.battery ?? 0 })
   }
-  // 电量：接口接入后换 phone.battery / phone.charging；当前为 mock 占位
-  // 2026-08-08：三态 emoji——🔌有线充电 / ⚡无线充电 / 🔋未充电
-  const mockCharging: { active: boolean; method?: 'wired' | 'wireless' } = { active: true, method: 'wireless' }
-  const emoji = !mockCharging.active ? '🔋' : (mockCharging.method === 'wired' ? '🔌' : '⚡')
-  bars.push({ label: `电量${emoji}`, pct: 87 })
   return bars
 })
-// 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
+// 当前应用行（2026-08-08：数据源改 phone.focus_app）
 const procRows = computed(() => {
-  // 2026-08-08（手机卡）：只显示「当前应用」一行（删除副屏幕行）——名称 + 类型
-  // 数据暂用电脑 sensor 主屏（接口改造后换 phone.focus_app）
   const rows: Array<{ name: string; cat: string; focus: boolean }> = []
-  const s = state.value?.screens?.find((x) => x.primary)
-  if (s) {
-    rows.push({ name: s.proc ?? '当前应用', cat: s.category, focus: true })
-  } else if (state.value?.category) {
-    rows.push({ name: '当前应用', cat: state.value.category ?? 'unknown', focus: true })
+  const f = phone.value?.focus_app
+  if (f) {
+    rows.push({ name: f.name, cat: f.cat, focus: true })
   }
   return rows
 })
@@ -120,7 +150,7 @@ const ringTotal = computed(() => {
   return { v: Math.round(total / 60), unit: '分' }
 })
 const ringItems = computed(() => {
-  const c = state.value?.today_categories ?? {}
+  const c = phone.value?.today_categories ?? {}
   const items = Object.entries(c).filter(([, v]) => v >= 60)
   const total = items.reduce((a, [, v]) => a + v, 0)
   return { items: items.map(([k, v]) => ({ k, v, pct: total ? v / total : 0 })), total }
@@ -277,23 +307,9 @@ function fmtSeg(s: Seg) {
   return base
 }
 
-async function refresh() {
-  const myVersion = ++refreshVersion
-  loading.value = true
-  try {
-    const raw = await invoke<string>('read_sensor_state')
-    if (myVersion !== refreshVersion) return
-    state.value = raw ? JSON.parse(raw) : null
-    error.value = ''
-    lastTs.value = Date.now()
-  } catch {
-    if (myVersion === refreshVersion) error.value = '本地监测未运行'
-  } finally {
-    if (myVersion === refreshVersion) loading.value = false
-  }
+function refresh() {
+  // 2026-08-08：接口未接，留空（MOCK 数据渲染）；接入后 fetch hub /api/v1/phone-state 写 phone/lastTs
 }
-
-useSyncRefresh(refresh, 30000) // 30s 同步刷新线（setup 顶层订阅，onUnmounted 生效）
 
 onMounted(() => {
   refresh()
@@ -328,7 +344,7 @@ onMounted(() => {
         <div v-for="b in resourceBars" :key="b.label" class="bar-row">
           <span class="bar-label">{{ b.label }}</span>
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
-          <span class="bar-val">{{ b.pct }}%{{ b.sub ? ' ' + b.sub : '' }}</span>
+          <span class="bar-val">{{ b.pct }}%</span>
         </div>
       </div>
 
@@ -404,7 +420,7 @@ onMounted(() => {
       </div>
 
       <div class="foot">
-        更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }} · 坐 {{ sitting }} 分钟
+        更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }} · 屏幕 {{ sitting }} 分钟
       </div>
     </template>
 
