@@ -166,6 +166,17 @@ export async function getPhoneTrack(hours = 24, limit = 200, signal?: AbortSigna
   return requestBus<{ track: PhoneTrackPoint[] }>(`/api/v1/phone-track?hours=${hours}&limit=${limit}`, signal)
 }
 
+export interface PhoneNotifyItem {
+  id: number
+  created_at: number
+  data?: { kind?: string; pkg?: string; title?: string; text?: string; ts?: number }
+}
+
+/** 拉取最近手机通知（bus /api/v1/phone-notify/recent?limit=N，只读，时间正序）。 */
+export async function getPhoneNotifies(limit = 10, signal?: AbortSignal): Promise<{ notifies: PhoneNotifyItem[] }> {
+  return requestBus<{ notifies: PhoneNotifyItem[] }>(`/api/v1/phone-notify/recent?limit=${limit}`, signal)
+}
+
 /**
  * 头像等后端静态图片的完整 URL。
  * dev（Vite）下 base 为空 → 返回相对路径，由 Vite public 静态服务提供；

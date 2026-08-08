@@ -8,7 +8,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { getPhoneState, getPhoneTrack } from '@/services/api'
+import { getPhoneState, getPhoneTrack, getPhoneNotifies, type PhoneNotifyItem } from '@/services/api'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -319,8 +319,10 @@ function refresh() {
   Promise.all([
     getPhoneState(),
     getPhoneTrack(24, 200).catch(() => null),
+    getPhoneNotifies(10).catch(() => null),
   ])
-    .then(([st, tr]) => {
+    .then(([st, tr, nt]) => {
+      if (nt?.notifies) phoneNotifies.value = nt.notifies
       const r = st.raw ?? {}
       phone.value = {
         last_at: st.at ?? Date.now() / 1000,
@@ -362,6 +364,7 @@ const PHONE_ACTIONS = [
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
   { key: 'screenrecord', icon: '🎥', label: '录屏', hint: '录 15 秒存电脑' },
   { key: 'pull_files', icon: '📁', label: '文件', hint: '电脑端浏览手机文件（拖拽传输）', local: true },
+  { key: 'notify', icon: '🔔', label: '通知', hint: '手机通知转发（hub）', local: true },
   { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
   { key: 'torch', icon: '🔦', label: '手电', hint: '需手机端 App', disabled: true },
@@ -384,6 +387,8 @@ async function runPhoneAction(a: { key: string; label: string; local?: boolean; 
     } else if (a.key === 'pull_files') {
       showFiles.value = !showFiles.value
       if (showFiles.value) fsList(fsPath.value)
+    } else if (a.key === 'notify') {
+      showNotifies.value = !showNotifies.value
     }
     return
   }
@@ -406,6 +411,11 @@ async function runPhoneAction(a: { key: string; label: string; local?: boolean; 
 
 /** 轨迹迷你图（SVG 按经纬度归一化连线；数据 mock，接口接入后 phone.track 替换） */
 
+/** 2026-08-08：手机通知区（hub 最近转发） */
+const showNotifies = ref(false)
+const phoneNotifies = ref<PhoneNotifyItem[]>([])
+const notifyIcon: Record<string, string> = { call: '📞', chat: '💬', sms: '✉️', alarm: '⏰', notify: '🔔' }
+
 /** 2026-08-08：文件浏览器（桌宠内嵌，adb 驱动）——列表 / 下载 / 拖放上传 */
 const showFiles = ref(false)
 const fsPath = ref('/sdcard')
@@ -417,6 +427,9 @@ function fmtSize(n: number): string {
   if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
   if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
   return n + ' B'
+}
+function fmtNotifyTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 async function fsList(path: string) {
   fsLoading.value = true
@@ -605,6 +618,26 @@ watch(showFiles, (v) => {
         </div>
         <div class="fs-hint">双击文件夹进入 · ⤓ 下载到电脑 · 拖文件到此处上传到手机</div>
         <div v-if="fsMsg" class="fs-msg">{{ fsMsg }}</div>
+      </div>
+
+      <!-- ②b3 手机通知区（hub 转发的最近通知） -->
+      <div v-if="showNotifies" class="fs-panel">
+        <div class="fs-head">
+          <span class="fs-path">🔔 最近手机通知（{{ phoneNotifies.length }}）</span>
+          <button class="fs-btn" title="刷新" @click="refresh">⟳</button>
+        </div>
+        <div class="fs-list">
+          <div v-for="n in phoneNotifies" :key="n.id" class="notify-row">
+            <span class="fs-icon">{{ notifyIcon[n.data?.kind ?? 'notify'] ?? '🔔' }}</span>
+            <div class="notify-body">
+              <div class="notify-title">{{ n.data?.title }}</div>
+              <div v-if="n.data?.text" class="notify-text">{{ n.data.text }}</div>
+              <div class="notify-time">{{ fmtNotifyTime(n.created_at) }}</div>
+            </div>
+          </div>
+          <div v-if="!phoneNotifies.length" class="fs-empty">暂无转发通知（App 通知桥未开或未收到）</div>
+        </div>
+        <div class="fs-hint">手机通知 → hub 转发（App 需开通知桥 + 通知使用权）</div>
       </div>
 
       <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
@@ -838,6 +871,35 @@ watch(showFiles, (v) => {
   font-size: 10px;
   color: var(--text-muted);
   text-align: center;
+}
+/* 通知区 */
+.notify-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.notify-row:last-child { border-bottom: none; }
+.notify-body { flex: 1; min-width: 0; }
+.notify-title {
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notify-text {
+  font-size: 9px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notify-time {
+  font-size: 8px;
+  color: var(--text-muted);
+  font-family: 'Courier New', monospace;
 }
 .fs-hint {
   margin-top: 4px;

@@ -98,6 +98,11 @@ class BusHttpHandler(BaseHTTPRequestHandler):
             hours = q.get("hours", ["24"])[0]
             limit = q.get("limit", ["200"])[0]
             self._proxy_hub("/api/v1/phone-track", f"hours={hours}&limit={limit}")
+        elif parsed.path == "/api/v1/phone-notify/recent":
+            # 最近手机通知（2026-08-08，转发 hub，桌宠通知区）
+            q = parse_qs(parsed.query)
+            limit = q.get("limit", ["10"])[0]
+            self._proxy_hub("/api/v1/phone-notify/recent", f"limit={limit}")
         else:
             self._json(404, {"error": {"code": "NOT_FOUND", "message": "unknown endpoint"}})
 
