@@ -279,8 +279,8 @@ onMounted(() => {
   <div class="computer-card">
     <div class="head">
       <div class="head-left">
-        <span class="dot" :class="stale ? 'down' : 'up'" title="检测器在线状态" />
-        <span class="title">🖥️ 电脑状态</span>
+        <span class="dot" :class="stale ? 'down' : 'up'" title="手机在线状态（30s 心跳）" />
+        <span class="title">📱 手机状态</span>
       </div>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
