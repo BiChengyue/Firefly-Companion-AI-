@@ -31,7 +31,7 @@ let refreshVersion = 0
 const CAT_LABELS: Record<string, string> = {
   coding: '写代码', browsing: '浏览网页', communication: '通讯聊天', game: '游戏',
   video: '看视频', document: '文档处理', meeting: '会议', design: '设计',
-  writing: '写作', tool: '工具', unknown: '使用中', rest: '休息',
+  writing: '写作', tool: '工具', unknown: '其他', rest: '休息',
   multi: '多任务', offline: '离线', star_rail: '星铁',
 }
 const CAT_COLORS: Record<string, string> = {
@@ -73,8 +73,10 @@ const procRows = computed(() => {
     if (!s.primary) subIdx++
   }
   if (!rows.length && state.value?.category) {
-    rows.push({ name: '主屏', cat: state.value.category ?? 'unknown', focus: true })
+    rows.push({ name: '主屏幕', cat: state.value.category ?? 'unknown', focus: true })
   }
+  // 主屏幕排最上面（primary 优先），其余按原顺序
+  rows.sort((a, b) => (a.name === '主屏幕' ? -1 : 0) - (b.name === '主屏幕' ? -1 : 0))
   return rows
 })
 // 当日圆环数据
