@@ -2,7 +2,8 @@
 /** 健康数据小组件（T-31-A2 + T32 布局）— 从 bus /api/v1/fitness(+history) 拉取健康数据。
  *  T32：2 列 grid（🚶步数｜💓心率 / 😴睡眠｜📈近7天步数 SVG 折线图）；移除 summary 简报；
  *  心率/睡眠缺失显示「—」。30s 自动刷新 + 手动刷新；异步加载不阻塞。 */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useSyncRefresh } from '@/composables/useSyncRefresh'
 import { getFitness, getFitnessHistory, type FitnessDaily, type FitnessHistory } from '@/services/api'
 
 const fitness = ref<FitnessDaily | null>(null)
@@ -10,15 +11,11 @@ const history = ref<FitnessHistory | null>(null)
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
 let refreshVersion = 0
 
 onMounted(async () => {
   await refresh()
-  timer = setInterval(refresh, 30000) // 30s 自动刷新
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  useSyncRefresh(refresh, 30000) // 30s 同步刷新线
 })
 
 async function refresh() {

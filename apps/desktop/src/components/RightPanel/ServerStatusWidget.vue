@@ -1,22 +1,19 @@
 <script setup lang="ts">
 /** 服务器状态小组件（T-29-A3）— 从 bus /api/v1/monitor 拉取服务器状态快照。
  *  30s 自动刷新 + 手动刷新按钮；异步加载不阻塞主界面，失败显示「监控暂不可用」。 */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getServerMonitor, type ServerMonitor } from '@/services/api'
+import { useSyncRefresh } from '@/composables/useSyncRefresh'
 
 const monitor = ref<ServerMonitor | null>(null)
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
 let refreshVersion = 0
 
 onMounted(async () => {
   await refresh()
-  timer = setInterval(refresh, 30000) // 30s 自动刷新
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  useSyncRefresh(refresh, 30000) // 30s 同步刷新线（与电脑/健康卡同 tick）
 })
 
 async function refresh() {
@@ -61,7 +58,7 @@ const resourceBars = computed(() => {
 <template>
   <div class="server-card">
     <div class="head">
-      <span class="title">🖥 服务器状态</span>
+      <span class="title">🌐 服务器状态</span>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 
