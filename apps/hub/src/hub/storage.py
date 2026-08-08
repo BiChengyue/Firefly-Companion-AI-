@@ -86,6 +86,19 @@ class HubStore:
                     created_at REAL NOT NULL,
                     consumed INTEGER NOT NULL DEFAULT 0)"""
             )
+            # fitness_history（T31：健康历史归档，date 主键 upsert 幂等）
+            self._state.execute(
+                """CREATE TABLE IF NOT EXISTS fitness_history(
+                    date TEXT PRIMARY KEY,
+                    steps INTEGER,
+                    sleep_secs INTEGER,
+                    sleep_score INTEGER,
+                    resting_hr REAL,
+                    spo2 REAL,
+                    vo2max REAL,
+                    weight REAL,
+                    updated_at REAL NOT NULL)"""
+            )
         with self._private:
             self._private.execute(
                 """CREATE TABLE IF NOT EXISTS items(
@@ -228,7 +241,49 @@ class HubStore:
             )
             # 只保留 7 天
             self._state.execute("DELETE FROM push_events WHERE created_at < ?", (at - 7 * 86400,))
+
+    # ---- fitness_history（T31：健康历史归档，date 主键 upsert 幂等）----
+
+    def upsert_fitness_history(self, rows: list[dict]) -> int:
+        """按 date upsert（重复归档覆盖不新增，幂等）。返回写入条数。
+
+        rows: [{date: "YYYY-MM-DD", steps?, sleep?: {secs, score},
+                resting_hr?, spo2?, vo2max?, weight?}]
+        """
+        with self._state:
+            n = 0
+            for r in rows:
+                sleep = r.get("sleep") or {}
+                self._state.execute(
+                    """INSERT INTO fitness_history(date, steps, sleep_secs, sleep_score,
+                       resting_hr, spo2, vo2max, weight, updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(date) DO UPDATE SET
+                         steps=excluded.steps, sleep_secs=excluded.sleep_secs, sleep_score=excluded.sleep_score,
+                         resting_hr=excluded.resting_hr, spo2=excluded.spo2, vo2max=excluded.vo2max,
+                         weight=excluded.weight, updated_at=excluded.updated_at""",
+                    (r["date"], r.get("steps"), sleep.get("secs"), sleep.get("score"),
+                     r.get("resting_hr"), r.get("spo2"), r.get("vo2max"), r.get("weight"), time.time()),
+                )
+                n += 1
             self._state.commit()
+            return n
+
+    def query_fitness_history(self, days: int = 7) -> list[dict]:
+        with self._state:
+            rows = self._state.execute(
+                "SELECT date, steps, sleep_secs, sleep_score, resting_hr, spo2, vo2max, weight "
+                "FROM fitness_history ORDER BY date DESC LIMIT ?",
+                (days,),
+            ).fetchall()
+        out = []
+        for r in rows:
+            sleep = {"secs": r[2], "score": r[3]} if (r[2] is not None or r[3] is not None) else None
+            out.append({
+                "date": r[0], "steps": r[1], "sleep": sleep,
+                "resting_hr": r[4], "spo2": r[5], "vo2max": r[6], "weight": r[7],
+            })
+        return out
 
     def get_unconsumed_events(self, limit: int = 10) -> list[dict]:
         with self._state:

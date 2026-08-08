@@ -232,6 +232,14 @@ class HubHandler(BaseHTTPRequestHandler):
                 d["age_seconds"] = age
                 d["fresh"] = age < 900
                 self._json(200, d)
+        elif path == "/api/v1/fitness/history":
+            # T31：健康历史（近 N 天，默认 7，上限 90）
+            try:
+                days = int(parse_qs(parsed.query).get("days", ["7"])[0])
+            except (ValueError, IndexError):
+                days = 7
+            days = max(1, min(days, 90))
+            self._json(200, {"days": days, "history": self.server.store.query_fitness_history(days)})
         elif path == "/api/v1/phone-state":
             latest = self.server.store.get_phone_state(1)
             if not latest:
@@ -343,6 +351,28 @@ class HubHandler(BaseHTTPRequestHandler):
                 body["received_at"] = time.time()
                 _write_fitness_cache(body)
                 self._json(200, {"status": "ok"})
+            except Exception as e:
+                self._json(400, {"error": {"code": "INVALID_PAYLOAD", "message": str(e)}})
+            return
+        if parsed.path == "/api/v1/ingest/fitness-history":
+            # T31：健康历史归档（fitness_sync 拉近 30 天 → upsert，幂等）
+            try:
+                raw = _read_body(self)
+                if raw is None:
+                    self._json(413, {"error": {"code": "PAYLOAD_TOO_LARGE", "message": "body > 64KB"}})
+                    return
+                body = json.loads(raw)
+                if isinstance(body, dict):
+                    rows = body.get("dates") or body.get("history") or []
+                elif isinstance(body, list):
+                    rows = body
+                else:
+                    raise ValueError("body must be array or {dates:[...]}")
+                rows = [r for r in rows if isinstance(r, dict) and r.get("date")]
+                if not rows:
+                    raise ValueError("no valid date rows")
+                n = self.server.store.upsert_fitness_history(rows)
+                self._json(200, {"status": "ok", "upserted": n})
             except Exception as e:
                 self._json(400, {"error": {"code": "INVALID_PAYLOAD", "message": str(e)}})
             return

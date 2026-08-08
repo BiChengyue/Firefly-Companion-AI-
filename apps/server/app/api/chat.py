@@ -764,6 +764,26 @@ async def chat_ws(ws: WebSocket):
                         except Exception as _e_status:
                             logger.warning("[chat] server_status 注入失败: %s", _e_status)
 
+                    # T31：健康数据意图注入（最新/历史，同 server_status 模式；关键词命中才注入）
+                    if mode == "daily" and re.search(
+                        r"(步数|走了多少|走了几步|运动|锻炼|睡眠|睡了|心率|健康|跑了|这周|最近)", content
+                    ):
+                        _hist = bool(re.search(r"(这周|最近|一周|这几天|趋势|每天|平均)", content))
+                        try:
+                            from app.core.tools.builtin.fitness_tool import (
+                                build_fitness_injection as _build_fi,
+                                build_fitness_history_injection as _build_fh,
+                            )
+                            _fit = _build_fh() if _hist else _build_fi()
+                            if _fit:
+                                system_prompt += (
+                                    "\n\n## 健康数据（用户正在询问，直接按以下数据回答，保持流萤口吻，"
+                                    "不提及'工具/查询/数据'字眼）\n"
+                                    + _fit
+                                )
+                        except Exception as _e_fit:
+                            logger.warning("[chat] fitness 注入失败: %s", _e_fit)
+
                     history.append(LLMMessage(role="user", content=content))
                     memory_manager.add_message("user", content)
                     # 强记忆实时记录：绕过批提取周期，直接写入记忆（偏好/人际关系/行程事件）

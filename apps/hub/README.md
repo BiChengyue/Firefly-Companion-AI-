@@ -50,6 +50,24 @@ cd apps/hub
 | `PCH_PROJECTS_DIR` | `C:\ProgramData\firefly-bot\projects` | 项目接管文件目录 |
 | `SR_ACCOUNT_FILE` | `C:\ProgramData\firefly-bot\data\sr_account.json` | 星铁账号数据 |
 
+## 只读/归档接口（HTTP）
+
+鉴权：只读接口 `X-PCH-Token`（`PCH_TOKEN` 或令牌文件）；检测器/手机上报 `X-Phone-Token`（`PCH_PHONE_TOKEN`）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/status` | 三库健康/统计 |
+| GET | `/api/v1/events?after=<ts>` | 未消费主动事件 |
+| POST | `/api/v1/events/consumed` | 消费确认（X-Phone-Token） |
+| GET | `/api/v1/context?project=<name>` | 脱敏项目上下文 |
+| GET | `/api/v1/fitness-state` | 最新健康缓存（fitness_sync 链路） |
+| GET | `/api/v1/fitness/history?days=N` | 近 N 天健康历史（T31；默认 7、上限 90） |
+| GET | `/api/v1/phone-location` | 手机定位缓存 |
+| POST | `/api/v1/ingest/event` | 手机事件上报（X-Phone-Token） |
+| POST | `/api/v1/ingest/computer` | 电脑状态上报 |
+| POST | `/api/v1/ingest/fitness` | 健康缓存更新（fitness_sync，X-PCH-Token） |
+| POST | `/api/v1/ingest/fitness-history` | 健康历史归档，date 主键 upsert 幂等（T31；body `{"dates":[{date,steps,sleep:{secs,score},resting_hr,spo2,vo2max,weight}]}` 或裸数组） |
+
 ## 与总线的衔接（CONTRACTS §0 架构图）
 
 - 总线（`apps/server/app/core/bus/`）负责输入路由、输出登记与生成；Hub 派发器按去处序列逐级投递。
