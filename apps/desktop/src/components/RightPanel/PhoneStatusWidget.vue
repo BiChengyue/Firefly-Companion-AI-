@@ -1,36 +1,33 @@
 <script setup lang="ts">
 /**
- * 手机状态卡（v3 完整版）— 仿电脑状态卡：30s 采样上报（位置低频）。
- * 接口留空：数据契约已定，接入 hub `GET /api/v1/phone-state` 后填 refresh() 即可。
+ * 手机状态卡 — 2026-08-08：直接把电脑状态卡结构搬过来，只改接口字段。
+ * 布局逐区对齐电脑卡：①标题栏 ②前台App(等价电脑屏行) ③资源占用条(电量/存储/内存)
+ * ④圆环+图例 ⑤活动条+三态预览窗 ⑥foot；手机特有：勿扰开关/网络/位置(轨迹)插在②下。
  *
- * 布局（完全参考电脑状态卡）：
- *   ① 标题栏（红绿点 = 30s 心跳新鲜度）
- *   ② 前台 App（焦点 dot + 名称 + 分类）
- *   ③ 基础格区：电量(含充电方式) / 勿扰(可开关) / 网络(含 WiFi 名) / 位置(点开地图+当天轨迹)
- *   ④ 当日圆环 + 图例（今日 App 分类分布）——同电脑卡
- *   ⑤ 本日活动条（主条 + 三态预览窗 AUTO/FOLLOW/LOCK）——同电脑卡
- *   ⑥ foot（更新时间）
+ * 接口留空（MOCK 渲染）：接入 hub GET /api/v1/phone-state 后填 refresh() 即可。
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-/** 未来 hub /api/v1/phone-state 返回结构（接口暂留空，先定契约） */
+/** 未来 hub /api/v1/phone-state 契约 */
 interface Seg { start: number; end: number; type: string; label?: string }
 interface TrackPt { t: number; lat: number; lng: number }
 interface PhoneState {
-  last_at?: number                            // 最近一次 30s 心跳
+  last_at?: number                            // 30s 心跳
   battery?: number                            // 电量 %
-  charging?: { active: boolean; method?: 'wired' | 'wireless' }  // 充电中 + 方式（有线/无线）
+  charging?: { active: boolean; method?: 'wired' | 'wireless' }
+  storage_pct?: number                        // 存储占用 %
+  ram_pct?: number                            // 内存占用 %
   dnd?: boolean                               // 勿扰（电脑可开关）
-  network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }  // 网络 + WiFi 名称
-  loc_bucket?: 'home' | 'work' | 'out'        // 位置桶（低频上报）
-  track?: TrackPt[]                           // 当天轨迹（低频上报；点开地图显示）
-  focus_app?: { name: string; cat: string } | null   // 前台 App
-  today_activities?: Seg[]                    // 今日活动段（仿电脑 sensor）
-  today_categories?: Record<string, number>   // 今日分类时长秒（圆环）
+  network?: { kind: 'wifi' | 'mobile' | 'offline'; ssid?: string }
+  loc_bucket?: 'home' | 'work' | 'out'        // 位置桶（低频）
+  track?: TrackPt[]                           // 当天轨迹（低频）
+  focus_app?: { name: string; cat: string } | null
+  screen_today_min?: number                   // 今日屏幕使用分钟
+  today_activities?: Seg[]
+  today_categories?: Record<string, number>
 }
 
-/** 2026-08-08：MOCK 数据——接口未接，先用模拟数据把 UI 完整渲染出来；
- *  手机端接入后：删掉初始 mock，在 refresh() 里 fetch hub /api/v1/phone-state 写 phone/lastTs */
+/** MOCK：接口未接，先用模拟数据渲染完整 UI */
 function mockActivities(): Seg[] {
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
   const base = t0.getTime() / 1000
@@ -60,40 +57,41 @@ const phone = ref<PhoneState | null>({
   last_at: Date.now() / 1000,
   battery: 87,
   charging: { active: true, method: 'wireless' },
+  storage_pct: 64,
+  ram_pct: 58,
   dnd: true,
   network: { kind: 'wifi', ssid: '我家WiFi' },
   loc_bucket: 'home',
   track: mockTrack,
   focus_app: { name: '微信', cat: 'social' },
+  screen_today_min: 156,
   today_activities: mockActivities(),
   today_categories: { social: 7800, video: 4200, game: 3600, reading: 5400, rest: 3600, tool: 3600 },
 })
-const lastTs = ref(Date.now())
 const error = ref('')
+const lastTs = ref(Date.now())
 const loading = ref(false)
+let refreshVersion = 0
 
-/** 勿扰开关（本地 UI；未来调 bus 下发指令到手机） */
+/** 勿扰开关（本地 UI；未来调 bus 下发） */
 const dndOverride = ref<boolean | null>(null)
 function toggleDnd() {
   if (!phone.value) return
   const cur = dndOverride.value ?? phone.value.dnd ?? false
   dndOverride.value = !cur
-  // TODO(手机端接入后)：POST bus 下发 dnd 开关指令到手机端
 }
-
-/** 位置格点击 → 展开/收起当天轨迹面板 */
+/** 位置格点击 → 轨迹面板 */
 const showTrack = ref(false)
 function toggleTrack() {
   showTrack.value = !showTrack.value
 }
 
-/** 30s 上报 → 5 分钟无心跳视为离线（与电脑卡一致） */
 const stale = computed(() => {
   if (!phone.value?.last_at) return true
   return Date.now() / 1000 - phone.value.last_at > 5 * 60
 })
 
-/** 手机 App 分类（今日圆环/图例/活动条） */
+/** 手机 App 分类 */
 const CAT_LABELS: Record<string, string> = {
   social: '社交', video: '影音', game: '游戏', shopping: '购物',
   tool: '工具', reading: '阅读', unknown: '其他', rest: '休息', away: '休息',
@@ -104,25 +102,19 @@ const CAT_COLORS: Record<string, string> = {
   tool: '#94a3b8', reading: '#06b6d4', unknown: '#64748b', rest: '#22c55e', away: '#22c55e',
   offline: '#9ca3af',
 }
-
 const LOC_LABELS: Record<string, string> = { home: '家', work: '公司', out: '外出' }
 const NET_LABELS: Record<string, string> = { wifi: 'Wi-Fi', mobile: '蜂窝', offline: '离线' }
 
-/** 基础格区四项 */
+/** ② 前台 App 行（等价电脑屏行：焦点 dot + 名称 + 分类） */
+const focusRow = computed(() => phone.value?.focus_app ?? null)
+
+/** 手机特有：勿扰 / 网络 / 位置（基础格，插在②下） */
 const basics = computed(() => {
   const p = phone.value
   return [
     {
-      label: '电量',
-      value: p?.battery != null
-        ? `${p.battery}%${p.charging?.active ? (p.charging.method === 'wireless' ? ' ⚡无线' : ' ⚡有线') : ''}`
-        : '—',
-      clickable: false,
-    },
-    {
       label: '勿扰',
       value: (dndOverride.value ?? p?.dnd) != null ? ((dndOverride.value ?? p?.dnd) ? '开启' : '关闭') : '—',
-      clickable: true,
       toggle: true,
     },
     {
@@ -130,21 +122,27 @@ const basics = computed(() => {
       value: p?.network
         ? `${NET_LABELS[p.network.kind] ?? p.network.kind}${p.network.kind === 'wifi' && p.network.ssid ? `·${p.network.ssid}` : ''}`
         : '—',
-      clickable: false,
     },
     {
       label: '位置',
       value: p?.loc_bucket ? (LOC_LABELS[p.loc_bucket] ?? p.loc_bucket) : '—',
-      clickable: true,
       track: true,
     },
   ]
 })
 
-/** 前台 App 行 */
-const focusRow = computed(() => phone.value?.focus_app ?? null)
+/** ③ 资源占用条（等价电脑 CPU/内存/磁盘）：电量 / 存储 / 内存 */
+const resourceBars = computed(() => {
+  const p = phone.value
+  if (!p) return []
+  return [
+    { label: '电量', pct: p.battery ?? 0, sub: p.charging?.active ? (p.charging.method === 'wireless' ? '⚡无线' : '⚡有线') : '' },
+    { label: '存储', pct: p.storage_pct ?? 0 },
+    { label: '内存', pct: p.ram_pct ?? 0 },
+  ]
+})
 
-/** 当日圆环（同电脑卡） */
+/** ④ 当日圆环 + 图例 */
 const ringItems = computed(() => {
   const cats = phone.value?.today_categories
   if (!cats) return { items: [] as Array<{ k: string; pct: number }>, total: 0 }
@@ -163,7 +161,7 @@ const ringTotal = computed(() => {
   return { v: (total / 3600).toFixed(1), unit: '时' }
 })
 
-// ── 活动条（完全参考电脑卡：主条 + 三态预览窗）──
+// ── ⑤ 活动条 + 三态预览窗（与电脑卡逐行一致）──
 const DAY_SEC = 86400
 const timeline = computed(() => {
   const acts = (phone.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
@@ -244,19 +242,20 @@ const winWindow = computed(() => {
       return { ...s, w }
     })
     .sort((a, b) => a.start - b.start)
-  const filled: Array<(typeof segs)[number] & { left: number }> = []
-  const sorted = [...segs].sort((a, b) => a.start - b.start)
-  for (const s of sorted) {
-    const prev = filled[filled.length - 1]
+  const raw: typeof segs = []
+  for (const s of segs) {
+    const prev = raw[raw.length - 1]
     if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
       prev.end = s.start
       prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
     }
-    // left = 绝对位置（窗口开头空隙留白，不累加——否则空隙被挤到末尾翻转）
-    const left = Math.max(0, ((s.start - t.start - winStart) / (winEnd - winStart)) * 100)
-    filled.push({ ...s, left })
+    raw.push(s)
   }
-  // 未来黑色段（与主条 future 一致）
+  const sorted = [...raw].sort((a, b) => a.start - b.start)
+  const filled = sorted.map((s) => {
+    const left = Math.max(0, ((s.start - t.start - winStart) / (winEnd - winStart)) * 100)
+    return { ...s, left }
+  })
   let futureLeft = 0
   let futureW = 0
   if (winEnd > nowSec) {
@@ -308,7 +307,7 @@ onUnmounted(() => {
 })
 
 function refresh() {
-  // 2026-08-08：接口未接，留空；接入后 fetch hub /api/v1/phone-state 并写 phone/lastTs
+  // 2026-08-08：接口未接，留空（MOCK）；接入后 fetch hub /api/v1/phone-state 写 phone/lastTs
 }
 </script>
 
@@ -325,7 +324,7 @@ function refresh() {
     <div v-if="error" class="unavailable">{{ error }}</div>
 
     <template v-else-if="phone">
-      <!-- ② 前台 App -->
+      <!-- ② 前台 App（等价电脑屏行） -->
       <ul class="procs">
         <li v-if="focusRow">
           <span class="dot focus" />
@@ -335,13 +334,13 @@ function refresh() {
         <li v-else class="empty-row">前台 App —</li>
       </ul>
 
-      <!-- ③ 基础格区 -->
+      <!-- 手机特有：勿扰开关 / 网络 / 位置 -->
       <div class="grid">
         <div
           v-for="b in basics"
           :key="b.label"
           class="cell"
-          :class="{ clickable: b.clickable }"
+          :class="{ clickable: b.toggle || b.track }"
           @click="b.toggle ? toggleDnd() : b.track ? toggleTrack() : null"
         >
           <span class="c-label">{{ b.label }}</span>
@@ -353,14 +352,22 @@ function refresh() {
         </div>
       </div>
 
-      <!-- 位置：当天轨迹面板（接口留空；未来 track 数组画折线 + 打开地图） -->
+      <!-- 位置轨迹面板 -->
       <div v-if="showTrack" class="track-panel">
         <div v-if="phone.track?.length" class="track-hint">轨迹 {{ phone.track.length }} 点（点击打开地图）</div>
-        <div v-else class="track-hint">暂无轨迹数据（手机端接入后显示当天轨迹）</div>
-        <!-- future: <svg> 按 track 经纬度画折线迷你地图；点击调 open(地图链接) </svg> -->
+        <div v-else class="track-hint">暂无轨迹数据</div>
       </div>
 
-      <!-- ④ 圆环 + 图例（同电脑卡） -->
+      <!-- ③ 资源占用条（电量/存储/内存） -->
+      <div class="bars">
+        <div v-for="b in resourceBars" :key="b.label" class="bar-row">
+          <span class="bar-label">{{ b.label }}</span>
+          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
+          <span class="bar-val">{{ b.pct }}%{{ b.sub ? ' ' + b.sub : '' }}</span>
+        </div>
+      </div>
+
+      <!-- ④ 圆环 + 图例 -->
       <div class="ring-block">
         <div class="ring" :style="ringItems.total ? { background: `conic-gradient(${ringItems.items.map((it, idx) => `${CAT_COLORS[it.k] ?? '#888'} ${idx === 0 ? 0 : ringItems.items.slice(0, idx).reduce((a, x) => a + x.pct, 0) * 100}% ${ringItems.items.slice(0, idx + 1).reduce((a, x) => a + x.pct, 0) * 100}%`).join(',')})` } : { background: '#333' }">
           <div class="ring-hole">{{ ringTotal.v }}<small>{{ ringTotal.unit }}</small></div>
@@ -375,7 +382,7 @@ function refresh() {
         </ul>
       </div>
 
-      <!-- ⑤ 活动条 + 三态预览窗（同电脑卡） -->
+      <!-- ⑤ 活动条 + 三态预览窗 -->
       <div class="timeline-wrap">
         <div ref="barEl" class="timeline" @mousemove="onBarMove" @click="onBarClick" @mouseleave="onBarLeave">
           <div
@@ -420,12 +427,9 @@ function refresh() {
       </div>
     </template>
 
-    <div v-else class="unavailable">
-      手机端待接入
-      <div class="hint">接入后显示：前台 App / 电量(有线·无线) / 勿扰(可开关) / 网络(WiFi名) / 位置(轨迹地图) / 今日分类 / 活动时间线</div>
-    </div>
+    <div v-else class="unavailable">手机端待接入</div>
 
-    <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }}</div>
+    <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }} · 屏幕 {{ phone?.screen_today_min != null ? phone.screen_today_min + ' 分钟' : '—' }}</div>
   </div>
 </template>
 
@@ -477,11 +481,6 @@ function refresh() {
   color: var(--text-muted);
   padding: 6px 0;
 }
-.hint {
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--text-tertiary, var(--text-muted));
-}
 .procs {
   list-style: none;
   margin: 0 0 8px;
@@ -509,7 +508,7 @@ function refresh() {
 }
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 6px 10px;
   margin-bottom: 8px;
 }
@@ -531,9 +530,10 @@ function refresh() {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
 }
 .c-val {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
   font-family: 'Courier New', monospace;
@@ -542,19 +542,20 @@ function refresh() {
   text-overflow: ellipsis;
 }
 .switch {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   border: 1px solid var(--border-main);
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 .switch.on { background: #22c55e; border-color: #22c55e; color: #fff; }
 .switch.off { background: transparent; }
-.track-btn { font-size: 11px; }
+.track-btn { font-size: 10px; }
 .track-panel {
   margin-bottom: 8px;
   padding: 6px 8px;
@@ -564,6 +565,33 @@ function refresh() {
 .track-hint {
   font-size: 10px;
   color: var(--text-muted);
+}
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bar-label { width: 30px; font-size: 10px; color: var(--text-muted); }
+.bar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.3));
+  overflow: hidden;
+}
+.bar-fill { height: 100%; border-radius: 3px; background: var(--accent, #06b6d4); }
+.bar-val {
+  width: 74px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'Courier New', monospace;
 }
 .ring-block {
   display: flex;
@@ -698,9 +726,8 @@ function refresh() {
   margin-top: 4px;
   font-size: 10px;
   color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-line;
+  line-height: 1.4;
 }
 .foot {
   margin-top: 8px;
