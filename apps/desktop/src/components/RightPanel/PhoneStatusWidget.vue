@@ -416,7 +416,7 @@ const PHONE_ACTIONS: PhoneAction[] = [
   { key: 'notify', icon: '💬', label: '通知', hint: '手机通知转发（hub）', local: true },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
   // ── 系统工具 ──
-  { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
+  { key: 'shizuku', icon: '🪼', label: 'Shizuku', hint: '激活 Shizuku' },
 ]
 const soundState = ref<'ring' | 'silent' | 'vibrate'>('ring')
 const SOUND_META: Record<string, { icon: string; label: string }> = {
