@@ -301,14 +301,9 @@ function onSvgMove(e: MouseEvent) {
   })
   hoverIdx.value = best
   hoverIdxLg.value = -1
-  // 悬浮窗跟随 hover 点（preserveAspectRatio=none → 线性换算到容器像素）；clamp 防溢出
-  if (best >= 0) {
-    const p = trendPts.value[best]
-    hoverPos.value = {
-      x: Math.min(Math.max((p.x / SVG_W) * rect.width, 55), rect.width - 55),
-      y: (p.y / SVG_H) * rect.height,
-    }
-  }
+  // 2026-08-08：采用大图同方案——悬浮窗跟随鼠标像素位置（clamp 防溢出）
+  const x = Math.min(Math.max(e.clientX - rect.left, 70), rect.width - 70)
+  hoverPos.value = { x, y: e.clientY - rect.top }
 }
 
 /** 大图鼠标移动 */
