@@ -204,7 +204,8 @@ const segColors = computed(() => segsFrom(trendPts.value, 'tg'))
 const showTrendLarge = ref(false)
 const SVG_LG_W = 300
 const SVG_LG_H = 160
-const trendPtsLg = computed(() => buildPts(trendDays.value, trendVals.value.plot, SVG_LG_W, SVG_LG_H, 12))
+const PAD_LG = 26 // 大图左侧轴区留白（纵轴刻度不遮挡点）
+const trendPtsLg = computed(() => buildPts(trendDays.value, trendVals.value.plot, SVG_LG_W, SVG_LG_H, PAD_LG))
 const segColorsLg = computed(() => segsFrom(trendPtsLg.value, 'tglg'))
 const areaPath = computed(() => {
   const pts = trendPts.value
@@ -218,7 +219,7 @@ const areaPathLg = computed(() => {
   return `${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L ${pts[pts.length - 1].x.toFixed(1)},${SVG_LG_H} L ${pts[0].x.toFixed(1)},${SVG_LG_H} Z`
 })
 
-/** 大图纵轴刻度（3 档，按指标范围与单位） */
+/** 大图纵轴刻度（3 档，按指标范围与单位）——标签放轴区（x≈20），不被边框遮挡 */
 const yTicksLg = computed(() => {
   const vals = trendVals.value.plot
   const [lo, hi] = metric.value.range(vals)
@@ -237,6 +238,8 @@ const yTicksLg = computed(() => {
 // ── hover：显示当天全部数据（原始值，缺失标 —，不用旧值/默认值）──
 const hoverIdx = ref(-1)
 const hoverIdxLg = ref(-1)
+/** 2026-08-08：大图悬浮窗跟随鼠标（像素位置，相对 SVG 容器） */
+const hoverPosLg = ref<{ x: number; y: number } | null>(null)
 const hoverPoint = computed(() => (hoverIdx.value >= 0 && hoverIdx.value < trendPts.value.length ? trendPts.value[hoverIdx.value] : null))
 const hoverPointLg = computed(() => (hoverIdxLg.value >= 0 && hoverIdxLg.value < trendPtsLg.value.length ? trendPtsLg.value[hoverIdxLg.value] : null))
 
@@ -293,6 +296,9 @@ function onSvgMoveLg(e: MouseEvent) {
   })
   hoverIdxLg.value = best
   hoverIdx.value = -1
+  // 悬浮窗跟随鼠标（像素）；左右留边防溢出
+  const x = Math.min(Math.max(e.clientX - rect.left, 70), rect.width - 70)
+  hoverPosLg.value = { x, y: e.clientY - rect.top }
 }
 
 </script>
@@ -329,13 +335,7 @@ function onSvgMoveLg(e: MouseEvent) {
         <div class="cell trend-cell">
           <div class="trend-head">
             <span class="c-label">📈 {{ metric.label }}</span>
-            <select v-model="selectedMetric" class="metric-select" title="选择纵轴指标">
-              <option value="steps">步数</option>
-              <option value="sleepSecs">睡眠时长</option>
-              <option value="sleepScore">睡眠得分</option>
-              <option value="restingHr">静息心率</option>
-              <option value="weight">体重</option>
-            </select>
+            <!-- 2026-08-08：纵轴下拉已移到大图区（只在显示大图时出现）；小图标题跟随联动 -->
           </div>
           <div class="chart-wrap" :class="{ large: showTrendLarge }" @click="showTrendLarge = !showTrendLarge" title="点击查看大图">
             <svg
@@ -390,7 +390,8 @@ function onSvgMoveLg(e: MouseEvent) {
               />
             </svg>
             <div v-else class="trend-empty">暂无数据</div>
-            <div v-if="hoverDetail" class="chart-tip">
+            <!-- 2026-08-08：大图展开时移除小图悬浮显示（避免遮挡/与点重叠） -->
+            <div v-if="!showTrendLarge && hoverDetail" class="chart-tip">
               <div class="tip-date">{{ hoverDetail.date }}</div>
               <div v-for="(r, ri) in hoverDetail.rows" :key="ri" class="tip-row">
                 <span class="tip-k">{{ r[0] }}</span>
@@ -403,6 +404,17 @@ function onSvgMoveLg(e: MouseEvent) {
 
       <!-- 2026-08-08：趋势大图（点击小图展开，卡片下部显示；再点收起） -->
       <div v-if="showTrendLarge && trendPtsLg.length" class="trend-large">
+        <div class="trend-large-head">
+          <span class="c-label">📈 {{ metric.label }}</span>
+          <!-- 2026-08-08：纵轴下拉放回大图区右上（只在显示大图时出现） -->
+          <select v-model="selectedMetric" class="metric-select" title="选择纵轴指标">
+            <option value="steps">步数</option>
+            <option value="sleepSecs">睡眠时长</option>
+            <option value="sleepScore">睡眠得分</option>
+            <option value="restingHr">静息心率</option>
+            <option value="weight">体重</option>
+          </select>
+        </div>
         <svg
           :viewBox="`0 0 ${SVG_LG_W} ${SVG_LG_H}`"
           class="trend-large-svg"
@@ -419,13 +431,15 @@ function onSvgMoveLg(e: MouseEvent) {
               <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
             </linearGradient>
           </defs>
-          <!-- 纵轴刻度线 + 标签 -->
+          <!-- 2026-08-08：明显横纵轴（主线 + 刻度虚线 + 轴区标签防遮挡） -->
+          <line :x1="PAD_LG" y1="8" :x2="PAD_LG" :y2="SVG_LG_H - 10" stroke="var(--border-main)" stroke-width="1" />
+          <line :x1="PAD_LG" :y1="SVG_LG_H - 10" :x2="SVG_LG_W - 6" :y2="SVG_LG_H - 10" stroke="var(--border-main)" stroke-width="1" />
           <g v-for="(t, ti) in yTicksLg" :key="'y' + ti">
             <line
-              :x1="12" :y1="t.y" :x2="SVG_LG_W - 8" :y2="t.y"
+              :x1="PAD_LG" :y1="t.y" :x2="SVG_LG_W - 8" :y2="t.y"
               stroke="var(--border-subtle)" stroke-width="0.5" stroke-dasharray="2 3"
             />
-            <text :x="6" :y="t.y + 3" text-anchor="end" font-size="8" fill="var(--text-secondary)">
+            <text :x="PAD_LG - 5" :y="t.y + 3" text-anchor="end" font-size="8" fill="var(--text-primary)">
               {{ t.label }}
             </text>
           </g>
@@ -461,6 +475,18 @@ function onSvgMoveLg(e: MouseEvent) {
             r="4.5" fill="var(--accent)" stroke="#fff" stroke-width="1.2"
           />
         </svg>
+        <!-- 2026-08-08：大图悬浮窗跟随鼠标位置（不固定显示） -->
+        <div
+          v-if="hoverPointLg && hoverDetail"
+          class="chart-tip-lg"
+          :style="{ left: (hoverPosLg?.x ?? 0) + 'px', top: (hoverPosLg?.y ?? 0) + 'px' }"
+        >
+          <div class="tip-date">{{ hoverDetail.date }}</div>
+          <div v-for="(r, ri) in hoverDetail.rows" :key="ri" class="tip-row">
+            <span class="tip-k">{{ r[0] }}</span>
+            <span class="tip-v">{{ r[1] }}</span>
+          </div>
+        </div>
       </div>
 
       <div class="foot">
@@ -578,11 +604,34 @@ function onSvgMoveLg(e: MouseEvent) {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px dashed var(--border-subtle);
+  position: relative;   /* 2026-08-08：大图悬浮窗跟随鼠标定位基准 */
+}
+.trend-large-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 .trend-large-svg {
   width: 100%;
   height: 160px;
   display: block;
+}
+/* 2026-08-08：大图悬浮窗——跟随鼠标位置（由 onSvgMoveLg 写入 left/top） */
+.chart-tip-lg {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 8px));
+  background: var(--bg-elevated, rgba(20, 20, 24, 0.95));
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  z-index: 6;
+  min-width: 120px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
 }
 .chart-tip {
   position: absolute;
@@ -597,6 +646,7 @@ function onSvgMoveLg(e: MouseEvent) {
   z-index: 5;
   min-width: 120px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;   /* 2026-08-08：不拦截鼠标——修复悬浮窗与数据点重叠导致 hover 无高亮 */
 }
 .tip-date { font-weight: 700; margin-bottom: 2px; color: var(--text-primary); }
 .tip-row { display: flex; justify-content: space-between; gap: 10px; }

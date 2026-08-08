@@ -36,4 +36,8 @@ const companion = useCompanionStore()
   padding: 16px 14px;
   overflow-y: auto;
 }
+/* 2026-08-08：block 下恢复卡片间距（flex gap 丢失） */
+.right-panel > * + * {
+  margin-top: 14px;
+}
 </style>
