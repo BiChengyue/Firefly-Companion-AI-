@@ -6,6 +6,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -322,7 +323,7 @@ const PHONE_ACTIONS = [
   { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
   { key: 'screenrecord', icon: '🎥', label: '录屏', hint: '录 15 秒存电脑' },
-  { key: 'pull_files', icon: '📁', label: '文件', hint: '拉取 Download 到电脑' },
+  { key: 'pull_files', icon: '📁', label: '文件', hint: '电脑端浏览手机文件（拖拽传输）', local: true },
   { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
   { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
   { key: 'torch', icon: '🔦', label: '手电', hint: '需手机端 App', disabled: true },
@@ -340,7 +341,12 @@ const showTrack = ref(false)
 async function runPhoneAction(a: { key: string; label: string; local?: boolean; disabled?: boolean }) {
   if (a.disabled) return
   if (a.local) {
-    showTrack.value = !showTrack.value
+    if (a.key === 'track') {
+      showTrack.value = !showTrack.value
+    } else if (a.key === 'pull_files') {
+      showFiles.value = !showFiles.value
+      if (showFiles.value) fsList(fsPath.value)
+    }
     return
   }
   busyKey.value = a.key
@@ -361,6 +367,72 @@ async function runPhoneAction(a: { key: string; label: string; local?: boolean; 
 }
 
 /** 轨迹迷你图（SVG 按经纬度归一化连线；数据 mock，接口接入后 phone.track 替换） */
+
+/** 2026-08-08：文件浏览器（桌宠内嵌，adb 驱动）——列表 / 下载 / 拖放上传 */
+const showFiles = ref(false)
+const fsPath = ref('/sdcard')
+const fsEntries = ref<Array<{ name: string; dir: boolean; size: number }>>([])
+const fsLoading = ref(false)
+const fsMsg = ref('')
+
+function fmtSize(n: number): string {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
+  return n + ' B'
+}
+async function fsList(path: string) {
+  fsLoading.value = true
+  fsMsg.value = ''
+  try {
+    fsEntries.value = await invoke<Array<{ name: string; dir: boolean; size: number }>>('phone_fs_list', { path })
+    fsPath.value = path
+  } catch (e) {
+    fsMsg.value = `✗ ${e}`
+  } finally {
+    fsLoading.value = false
+  }
+}
+function fsOpen(name: string, dir: boolean) {
+  if (!dir) return
+  fsList(fsPath.value.endsWith('/') ? fsPath.value + name : fsPath.value + '/' + name)
+}
+function fsUp() {
+  const p = fsPath.value
+  const idx = p.lastIndexOf('/')
+  if (idx > 0) fsList(p.slice(0, idx))
+}
+async function fsDownload(name: string, dir: boolean) {
+  if (dir) return
+  const dirSel = await dialogOpen({ directory: true })
+  if (!dirSel || Array.isArray(dirSel)) return
+  try {
+    const res = await invoke<string>('phone_fs_pull', { remote: fsPath.value + '/' + name, destDir: String(dirSel) })
+    fsMsg.value = `⤓ ${res}`
+  } catch (e) {
+    fsMsg.value = `✗ ${e}`
+  }
+}
+async function fsDrop(e: DragEvent) {
+  e.preventDefault()
+  const files = e.dataTransfer?.files
+  if (!files?.length) return
+  for (const f of Array.from(files)) {
+    const buf = await f.arrayBuffer()
+    const u8 = new Uint8Array(buf)
+    const chunks: string[] = []
+    for (let i = 0; i < u8.length; i += 8192) {
+      chunks.push(String.fromCharCode(...u8.subarray(i, i + 8192)))
+    }
+    const b64 = btoa(chunks.join(''))
+    try {
+      await invoke('phone_fs_push', { base64Data: b64, remote: fsPath.value + '/' + f.name })
+      fsMsg.value = `⤒ ${f.name} 已上传`
+    } catch (err) {
+      fsMsg.value = `✗ ${f.name} ${err}`
+    }
+  }
+  fsList(fsPath.value)
+}
 
 // ── 2026-08-08d：Leaflet 轨迹地图（成熟库：平滑拖动/缩放/惯性/瓦片缓存）——高德瓦片 GCJ-02 与定位一致 ──
 let trackMap: L.Map | null = null
@@ -452,6 +524,35 @@ watch(showTrack, (v) => {
         </div>
       </div>
       <div v-if="actionMsg" class="qmsg">{{ actionMsg }}</div>
+
+      <!-- ②b2 文件浏览器（桌宠内嵌，adb 驱动：列表/下载/拖放上传） -->
+      <div v-if="showFiles" class="fs-panel" @dragover.prevent @drop="fsDrop">
+        <div class="fs-head">
+          <button class="fs-btn" title="上级" @click="fsUp">⬆</button>
+          <span class="fs-path">{{ fsPath }}</span>
+          <button class="fs-btn" title="回到 /sdcard" @click="fsList('/sdcard')">🏠</button>
+        </div>
+        <div class="fs-list">
+          <template v-if="!fsLoading">
+            <div
+              v-for="e in fsEntries"
+              :key="e.name"
+              class="fs-row"
+              :class="{ dir: e.dir }"
+              @dblclick="fsOpen(e.name, e.dir)"
+            >
+              <span class="fs-icon">{{ e.dir ? '📁' : '📄' }}</span>
+              <span class="fs-name" :title="e.name">{{ e.name }}</span>
+              <span class="fs-size">{{ e.dir ? '—' : fmtSize(e.size) }}</span>
+              <button v-if="!e.dir" class="fs-dl" title="下载到电脑" @click.stop="fsDownload(e.name, e.dir)">⤓</button>
+            </div>
+            <div v-if="!fsEntries.length" class="fs-empty">（空目录）</div>
+          </template>
+          <div v-else class="fs-empty">加载中…</div>
+        </div>
+        <div class="fs-hint">双击文件夹进入 · ⤓ 下载到电脑 · 拖文件到此处上传到手机</div>
+        <div v-if="fsMsg" class="fs-msg">{{ fsMsg }}</div>
+      </div>
 
       <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
       <div v-if="showTrack" class="track-panel">
@@ -603,6 +704,95 @@ watch(showTrack, (v) => {
 .qlabel { font-size: 9px; color: var(--text-secondary); }
 .qmsg {
   margin-bottom: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 文件浏览器 */
+.fs-panel {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.2));
+  border-radius: 6px;
+}
+.fs-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.fs-btn {
+  background: var(--bg-surface, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 5px;
+}
+.fs-btn:hover { color: var(--text-primary); }
+.fs-path {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.fs-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.fs-row:hover { background: rgba(255, 255, 255, 0.06); }
+.fs-row.dir { cursor: pointer; }
+.fs-icon { font-size: 11px; }
+.fs-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+.fs-size {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: 'Courier New', monospace;
+}
+.fs-dl {
+  background: none;
+  border: none;
+  color: var(--accent, #06b6d4);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.fs-dl:hover { color: #fff; }
+.fs-empty {
+  padding: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.fs-hint {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.fs-msg {
+  margin-top: 2px;
   font-size: 10px;
   color: var(--text-secondary);
   white-space: nowrap;

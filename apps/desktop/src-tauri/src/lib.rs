@@ -217,7 +217,6 @@ fn phone_command(action: String) -> Result<String, String> {
                 "-d", "file:///sdcard/Download",
             ])
         }
-        // 一键投屏：scrcpy（已安装到 E:\AI\scrcpy）
         "scrcpy" => {
             let scrcpy = r"E:\AI\scrcpy\scrcpy-win64-v3.2\scrcpy.exe";
             if !std::path::Path::new(scrcpy).exists() {
@@ -233,6 +232,77 @@ fn phone_command(action: String) -> Result<String, String> {
         "torch" => Err("华为无系统手电筒命令，需手机端 App 实现".into()),
         _ => Err(format!("unknown action: {action}")),
     }
+}
+
+/// 2026-08-08：手机文件浏览器（桌宠内嵌）——adb 驱动：列表 / 下载 / 上传
+#[derive(serde::Serialize)]
+struct PhoneFsEntry {
+    name: String,
+    dir: bool,
+    size: u64,
+}
+
+fn phone_adb_shell(args: &[&str]) -> Result<String, String> {
+    let _ = run_cmd(&[PHONE_ADB, "connect", PHONE_DEV]);
+    let mut full = vec![PHONE_ADB, "-s", PHONE_DEV, "shell"];
+    full.extend_from_slice(args);
+    run_cmd(&full)
+}
+
+#[tauri::command]
+fn phone_fs_list(path: String) -> Result<Vec<PhoneFsEntry>, String> {
+    let out = phone_adb_shell(&["ls", "-la", &path])?;
+    let mut entries = Vec::new();
+    for line in out.lines().skip(1) {
+        // drwxrwxrwx owner group size date name...
+        let mut it = line.split_whitespace();
+        let perms = it.next().unwrap_or("");
+        it.next(); // owner
+        it.next(); // group
+        let size = it.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        it.next(); // month
+        it.next(); // day
+        it.next(); // time
+        let name = it.collect::<Vec<_>>().join(" ");
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        entries.push(PhoneFsEntry {
+            name,
+            dir: perms.starts_with('d'),
+            size,
+        });
+    }
+    Ok(entries)
+}
+
+#[tauri::command]
+fn phone_fs_pull(remote: String, dest_dir: String) -> Result<String, String> {
+    let _ = run_cmd(&[PHONE_ADB, "connect", PHONE_DEV]);
+    let fname = remote.rsplit('/').next().unwrap_or("file").to_string();
+    let dest = format!(r"{dest_dir}\{fname}");
+    run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "pull", &remote, &dest])?;
+    Ok(format!("saved:{dest}"))
+}
+
+#[tauri::command]
+fn phone_fs_push(base64_data: String, remote: String) -> Result<String, String> {
+    // base64 → 临时文件 → adb push
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.trim())
+        .map_err(|e| format!("base64 解码失败: {e}"))?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("fb_push_{ts}"));
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    let _ = run_cmd(&[PHONE_ADB, "connect", PHONE_DEV]);
+    let res = run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "push", tmp.to_str().unwrap_or(""), &remote]);
+    let _ = std::fs::remove_file(&tmp);
+    res?;
+    Ok("pushed".into())
 }
 
 // ── T35：桌宠位置持久化 ────────────────────────────────
@@ -332,6 +402,9 @@ pub fn run() {
             read_ui_pref,
             write_ui_pref,
             phone_command,
+            phone_fs_list,
+            phone_fs_pull,
+            phone_fs_push,
         ])
         .setup(|app| {
             tray::setup_tray(app)?;
