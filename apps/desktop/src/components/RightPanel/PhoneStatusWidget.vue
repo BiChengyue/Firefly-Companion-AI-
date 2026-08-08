@@ -189,7 +189,8 @@ function onBarMove(e: MouseEvent) {
   if (!el) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  const sec = ratio * DAY_SEC
+  const nowSec = Date.now() / 1000 - timeline.value.start
+  const sec = Math.min(ratio * DAY_SEC, Math.max(0, nowSec))
   winMode.value = 'follow'
   winCenter.value = sec
   hoverSeg.value = findSegAt(sec)
@@ -204,8 +205,9 @@ function onBarClick(e: MouseEvent) {
     if (el) {
       const rect = el.getBoundingClientRect()
       const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+      const nowSec = Date.now() / 1000 - timeline.value.start
       winMode.value = 'lock'
-      winCenter.value = ratio * DAY_SEC
+      winCenter.value = Math.min(ratio * DAY_SEC, Math.max(0, nowSec))
       hoverSeg.value = findSegAt(winCenter.value)
     }
   }
@@ -232,7 +234,8 @@ const winWindow = computed(() => {
     winStart = Math.max(0, winEnd - 3600)
   } else {
     winStart = Math.max(0, winCenter.value - 1800)
-    winEnd = Math.min(DAY_SEC, winCenter.value + 1800)
+    winEnd = Math.min(nowSec, winCenter.value + 1800)
+    if (winEnd <= winStart) winEnd = winStart + 1
   }
   const segs = t.acts
     .filter((s) => (s.start - t.start) < winEnd && (s.end - t.start) > winStart)
@@ -241,14 +244,16 @@ const winWindow = computed(() => {
       return { ...s, w }
     })
     .sort((a, b) => a.start - b.start)
-  const filled: typeof segs = []
+  const filled: Array<(typeof segs)[number] & { left: number }> = []
+  let acc = 0
   for (const s of segs) {
     const prev = filled[filled.length - 1]
     if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
       prev.end = s.start
       prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
     }
-    filled.push(s)
+    filled.push({ ...s, left: acc })
+    acc += s.w
   }
   return { winStart, winEnd, segs: filled, mode: winMode.value }
 })
@@ -397,7 +402,7 @@ function refresh() {
               v-for="(s, i) in winWindow.segs"
               :key="i"
               class="zseg"
-              :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+              :style="{ left: s.left + '%', width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
             />
           </div>
@@ -666,8 +671,8 @@ function refresh() {
   padding: 0 2px;
 }
 .zoom-bar {
-  display: flex;
-  gap: 0;
+  position: relative;
+  display: block;
   height: 6px;
   border-radius: 3px;
   background: #3a3a3a;
@@ -675,8 +680,9 @@ function refresh() {
   overflow: hidden;
 }
 .zseg {
+  position: absolute;
+  top: 0;
   height: 100%;
-  flex: 0 0 auto;
 }
 .zoom-detail {
   margin-top: 4px;

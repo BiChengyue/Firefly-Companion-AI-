@@ -121,7 +121,9 @@ function onBarMove(e: MouseEvent) {
   if (!el) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  const sec = ratio * 86400
+  // 2026-08-08：hover 到未来区（黑色）时钳到当前时间——窗口不越过 now
+  const nowSec = Date.now() / 1000 - timeline.value.start
+  const sec = Math.min(ratio * 86400, Math.max(0, nowSec))
   winMode.value = 'follow'
   winCenter.value = sec
   hoverSeg.value = findSegAt(sec)
@@ -136,8 +138,9 @@ function onBarClick(e: MouseEvent) {
     if (el) {
       const rect = el.getBoundingClientRect()
       const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+      const nowSec = Date.now() / 1000 - timeline.value.start
       winMode.value = 'lock'
-      winCenter.value = ratio * 86400
+      winCenter.value = Math.min(ratio * 86400, Math.max(0, nowSec))
       hoverSeg.value = findSegAt(winCenter.value)
     }
   }
@@ -166,7 +169,9 @@ const winWindow = computed(() => {
     winStart = Math.max(0, winEnd - 3600)
   } else {
     winStart = Math.max(0, winCenter.value - 1800)
-    winEnd = Math.min(86400, winCenter.value + 1800)
+    // 2026-08-08：窗口右边界不超过当前时间（接近/超过 now 的部分不显示未来）
+    winEnd = Math.min(nowSec, winCenter.value + 1800)
+    if (winEnd <= winStart) winEnd = winStart + 1 // 防零宽
   }
   const segs = t.acts
     .filter((s) => (s.start - t.start) < winEnd && (s.end - t.start) > winStart)
@@ -176,15 +181,22 @@ const winWindow = computed(() => {
     })
     .sort((a, b) => a.start - b.start)
   // 窗口内小空隙（<90s，采样断档间隙）并入前段填色，副条连续无灰缝
-  const filled: typeof segs = []
+  const raw: typeof segs = []
   for (const s of segs) {
-    const prev = filled[filled.length - 1]
+    const prev = raw[raw.length - 1]
     if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
       prev.end = s.start // 前段只延伸到空隙起点，保留 s
       prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
     }
-    filled.push(s)
+    raw.push(s)
   }
+  // 2026-08-08：绝对定位（与主条同机制）——flex width% 与主条 left% 解析基准不一致导致错位；累加 left
+  let acc = 0
+  const filled = raw.map((s) => {
+    const o = { ...s, left: acc }
+    acc += s.w
+    return o
+  })
   return { winStart, winEnd, segs: filled, mode: winMode.value }
 })
 
@@ -347,7 +359,7 @@ onMounted(() => {
               v-for="(s, i) in winWindow.segs"
               :key="i"
               class="zseg"
-              :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+              :style="{ left: s.left + '%', width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
               @mouseenter="hoverSeg = s"
             />
           </div>
@@ -446,8 +458,8 @@ onMounted(() => {
 .zoom-mode.lock { color: #c07a1f; border-color: #c07a1f; }
 .zoom-back { margin-left: auto; border: 1px solid var(--border-subtle); background: none; color: var(--text-muted); border-radius: 4px; font-size: 10px; cursor: pointer; padding: 0 4px; }
 .zoom-back:hover { color: var(--accent-strong); border-color: var(--accent); }
-.zoom-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: #3a3a3a; }
-.zseg { height: 100%; flex: 0 0 auto; }
+.zoom-bar { position: relative; display: block; height: 14px; border-radius: 3px; overflow: hidden; background: #3a3a3a; }
+.zseg { position: absolute; top: 0; height: 100%; }
 .zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
 
 .foot { margin-top: 8px; font-size: 9px; color: var(--text-muted); font-family: 'Courier New', monospace; }
