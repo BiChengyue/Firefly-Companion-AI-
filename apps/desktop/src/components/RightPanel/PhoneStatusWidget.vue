@@ -65,8 +65,10 @@ const resourceBars = computed(() => {
     bars.push({ label: '内存', pct: u.mem ?? 0 })
     bars.push({ label: '磁盘', pct: u.disk?.C ?? 0 })
   }
-  // 电量：接口接入后换 phone.battery / phone.charging；当前为 mock 占位
-  bars.push({ label: '电量', pct: 87, sub: '⚡无线' })
+  // 电量：接口接入后换 phone.battery / phone.charging?.active；当前为 mock 占位
+  // 2026-08-08：充电状态用 label 后 emoji 表示（充电 ⚡ / 未充 🔋）
+  const charging = true // mock：充电中（无线）
+  bars.push({ label: charging ? '电量⚡' : '电量🔋', pct: 87 })
   return bars
 })
 // 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
