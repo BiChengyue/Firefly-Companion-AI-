@@ -370,6 +370,7 @@ body,
   display: grid;
   grid-template-columns: 240px 1fr 280px;
   grid-template-rows: 100%;
+  min-height: 0;          /* 2026-08-08：grid 容器允许收缩，行高不被内容顶开 → 侧栏滚动到底 */
   box-sizing: border-box;
   background: var(--bg-root);
   transition: background var(--transition);

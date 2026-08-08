@@ -94,120 +94,207 @@ const sleepColor = computed<string>(() => {
   return '#ef4444'
 })
 
-// ── T32：近 7 天步数 SVG 折线图（手绘 polyline，不引图表库；缺失天跳过）──
+// ── T32/T38：近 7 天趋势 SVG 折线图（可切换纵轴指标；缺失值前向填充+默认值绘图）──
 const SVG_W = 120
 const SVG_H = 42
-
-const trendPts = computed(() => {
-  const days = (history.value?.history ?? []) // 数据在 history（days 是请求参数数字——AI-4 误改回 .days 会 TypeError）
-    .filter((d) => d.steps != null) // 步数缺失的天跳过
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .slice(-7)
-  if (!days.length) return []
-  const nums = days.map((d) => Number(d.steps))
-  const max = Math.max(...nums)
-  const min = Math.min(...nums)
-  const range = max - min || 1
-  return days.map((d, i) => {
-    // 2026-08-08：首末点内缩（PAD_X），不贴边框
-    const x = days.length === 1 ? SVG_W / 2 : PAD_X + (i / (days.length - 1)) * (SVG_W - PAD_X * 2)
-    const y = SVG_H - 4 - ((Number(d.steps) - min) / range) * (SVG_H - 8)
-    return { x, y, date: d.date.slice(5), steps: Number(d.steps) }
-  })
-})
-
-/** 2026-08-08：趋势图首末点水平内缩量（避免贴边） */
 const PAD_X = 6
 
-/** 2026-08-08：步数分级色（与健康卡 stepsColor 同机制）——趋势点/折线过渡用 */
-function gradeColor(steps: number): string {
-  if (Number(steps) >= 8000) return '#22c55e'
-  if (Number(steps) >= 5000) return '#eab308'
-  return '#ef4444'
+type MetricKey = 'steps' | 'sleepSecs' | 'sleepScore' | 'restingHr' | 'weight'
+
+interface MetricDef {
+  label: string
+  unit: string
+  def: number // 全无数据时的绘图默认值
+  pick: (d: FitnessDaily) => number | null
+  grade: (v: number, all: number[]) => string
+  range: (vals: number[]) => [number, number]
 }
 
-/** 2026-08-08：折线分段（相邻点每段一个线性渐变，从起点色过渡到终点色） */
-function segsFrom(pts: Array<{ x: number; y: number; steps: number }>, prefix: string) {
+const METRICS: Record<MetricKey, MetricDef> = {
+  steps: {
+    label: '近 7 天步数', unit: '步', def: 6000,
+    pick: (d) => (d.steps != null ? Number(d.steps) : null),
+    grade: (v) => (v >= 8000 ? '#22c55e' : v >= 5000 ? '#eab308' : '#ef4444'),
+    range: (vals) => [0, Math.max(...vals, 1)],
+  },
+  sleepSecs: {
+    label: '近 7 天睡眠时长', unit: '小时', def: 7 * 3600,
+    pick: (d) => d.sleep?.secs ?? null,
+    grade: (v) => { const h = v / 3600; return h >= 7 && h <= 9 ? '#22c55e' : h >= 6 ? '#eab308' : '#ef4444' },
+    range: () => [0, 12 * 3600],
+  },
+  sleepScore: {
+    label: '近 7 天睡眠得分', unit: '分', def: 80,
+    pick: (d) => d.sleep?.score ?? null,
+    grade: (v) => (v >= 85 ? '#22c55e' : v >= 70 ? '#eab308' : '#ef4444'),
+    range: () => [0, 100],
+  },
+  restingHr: {
+    label: '近 7 天静息心率', unit: 'bpm', def: 70,
+    pick: (d) => d.resting_hr ?? null,
+    grade: (v) => (v >= 55 && v <= 85 ? '#22c55e' : v >= 50 && v <= 95 ? '#eab308' : '#ef4444'),
+    range: () => [40, 120],
+  },
+  weight: {
+    label: '近 7 天体重', unit: 'kg', def: 90, // 180 斤
+    pick: (d) => d.weight ?? null,
+    grade: (v, all) => {
+      const sorted = all.slice().sort((a, b) => a - b)
+      const mid = sorted.length ? sorted[Math.floor(sorted.length / 2)] : v
+      const d = Math.abs(v - mid) / (mid || 1)
+      return d <= 0.05 ? '#22c55e' : d <= 0.1 ? '#eab308' : '#ef4444'
+    },
+    range: (vals) => {
+      const mn = Math.min(...vals); const mx = Math.max(...vals)
+      const pad = (mx - mn) * 0.15 || 2
+      return [Math.max(0, mn - pad), mx + pad]
+    },
+  },
+}
+
+const selectedMetric = ref<MetricKey>('steps')
+const metric = computed(() => METRICS[selectedMetric.value])
+
+/** 近 7 天数据（按日期排序，缺失天保留——绘图用前向填充/默认值） */
+const trendDays = computed(() =>
+  (history.value?.history ?? []).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7),
+)
+
+/** 绘图数值：前向填充（无值用前一天值）；开头缺/全缺用默认值；raw 保留原始（数据栏显示不可用） */
+const trendVals = computed(() => {
+  const days = trendDays.value
+  const m = metric.value
+  const raw = days.map((d) => m.pick(d))
+  let prev: number | null = null
+  const plot = raw.map((v) => {
+    if (v != null) { prev = v; return v }
+    return prev != null ? prev : m.def
+  })
+  return { raw, plot }
+})
+
+/** 按尺寸构建点（y 用所选指标范围；点色按指标分级） */
+function buildPts(days: FitnessDaily[], vals: number[], W: number, H: number, PAD: number) {
+  const [lo, hi] = metric.value.range(vals)
+  const range = hi - lo || 1
+  const all = vals
+  return days.map((d, i) => {
+    const x = days.length === 1 ? W / 2 : PAD + (i / (days.length - 1)) * (W - PAD * 2)
+    const y = H - 4 - ((vals[i] - lo) / range) * (H - 8)
+    return { x, y, date: d.date.slice(5), rawDay: d, val: vals[i], color: metric.value.grade(vals[i], all) }
+  })
+}
+const trendPts = computed(() => buildPts(trendDays.value, trendVals.value.plot, SVG_W, SVG_H, PAD_X))
+
+/** 折线分段（相邻点每段一个线性渐变，从起点色过渡到终点色） */
+function segsFrom(pts: Array<{ x: number; y: number; color: string }>, prefix: string) {
   const segs: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; c1: string; c2: string }> = []
   for (let i = 0; i < pts.length - 1; i++) {
     segs.push({
       id: `${prefix}-${i}`,
-      x1: pts[i].x,
-      y1: pts[i].y,
-      x2: pts[i + 1].x,
-      y2: pts[i + 1].y,
-      c1: gradeColor(pts[i].steps),
-      c2: gradeColor(pts[i + 1].steps),
+      x1: pts[i].x, y1: pts[i].y, x2: pts[i + 1].x, y2: pts[i + 1].y,
+      c1: pts[i].color, c2: pts[i + 1].color,
     })
   }
   return segs
 }
 const segColors = computed(() => segsFrom(trendPts.value, 'tg'))
 
-// ── 2026-08-08：趋势大图（点击小图展开，卡片下部显示）──
+// ── 2026-08-08：趋势大图（点击小图展开，卡片下部显示；右上角纵轴选择器）──
 const showTrendLarge = ref(false)
 const SVG_LG_W = 300
 const SVG_LG_H = 160
-const trendPtsLg = computed(() => {
-  const days = (history.value?.history ?? [])
-    .filter((d) => d.steps != null)
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .slice(-7)
-  if (!days.length) return []
-  const nums = days.map((d) => Number(d.steps))
-  const max = Math.max(...nums)
-  const min = Math.min(...nums)
-  const range = max - min || 1
-  const PAD = 12
-  return days.map((d, i) => {
-    const x = days.length === 1 ? SVG_LG_W / 2 : PAD + (i / (days.length - 1)) * (SVG_LG_W - PAD * 2)
-    const y = SVG_LG_H - 16 - ((Number(d.steps) - min) / range) * (SVG_LG_H - 32)
-    return { x, y, date: d.date.slice(5), steps: Number(d.steps), label: Number(d.steps).toLocaleString() }
-  })
-})
+const trendPtsLg = computed(() => buildPts(trendDays.value, trendVals.value.plot, SVG_LG_W, SVG_LG_H, 12))
 const segColorsLg = computed(() => segsFrom(trendPtsLg.value, 'tglg'))
-const areaPathLg = computed(() => {
-  const pts = trendPtsLg.value
-  if (!pts.length) return ''
-  return `${trendPtsLg.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L ${pts[pts.length - 1].x.toFixed(1)},${SVG_LG_H} L ${pts[0].x.toFixed(1)},${SVG_LG_H} Z`
-})
-
-const polyPoints = computed(() =>
-  trendPts.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
-)
-
-// 2026-08-08：趋势面积路径（折线下渐变填充）
 const areaPath = computed(() => {
   const pts = trendPts.value
   if (!pts.length) return ''
-  const first = pts[0]
-  const last = pts[pts.length - 1]
-  return `${polyPoints.value} L ${last.x.toFixed(1)},${SVG_H} L ${first.x.toFixed(1)},${SVG_H} Z`
+  const first = pts[0]; const last = pts[pts.length - 1]
+  return `${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L ${last.x.toFixed(1)},${SVG_H} L ${first.x.toFixed(1)},${SVG_H} Z`
+})
+const areaPathLg = computed(() => {
+  const pts = trendPtsLg.value
+  if (!pts.length) return ''
+  return `${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L ${pts[pts.length - 1].x.toFixed(1)},${SVG_LG_H} L ${pts[0].x.toFixed(1)},${SVG_LG_H} Z`
 })
 
-// ── T33：hover 查看具体数据（鼠标移到折线附近 → 显示日期+步数）──
-const hoverIdx = ref(-1)
-const hoverPoint = computed(() =>
-  hoverIdx.value >= 0 && hoverIdx.value < trendPts.value.length ? trendPts.value[hoverIdx.value] : null,
-)
+/** 大图纵轴刻度（3 档，按指标范围与单位） */
+const yTicksLg = computed(() => {
+  const vals = trendVals.value.plot
+  const [lo, hi] = metric.value.range(vals)
+  const ticks: Array<{ y: number; label: string }> = []
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + ((hi - lo) * i) / 3
+    const y = SVG_LG_H - 16 - ((v - lo) / (hi - lo || 1)) * (SVG_LG_H - 32)
+    let label = String(Math.round(v))
+    if (metric.value === METRICS.sleepSecs) label = `${(v / 3600).toFixed(1)}h`
+    else if (metric.value === METRICS.weight) label = v.toFixed(1)
+    ticks.push({ y, label })
+  }
+  return ticks
+})
 
-/** SVG 鼠标移动 → 换算 viewBox 坐标 → 找最近数据点（preserveAspectRatio=none 需按实际尺寸缩放） */
+// ── hover：显示当天全部数据（原始值，缺失标 —，不用旧值/默认值）──
+const hoverIdx = ref(-1)
+const hoverIdxLg = ref(-1)
+const hoverPoint = computed(() => (hoverIdx.value >= 0 && hoverIdx.value < trendPts.value.length ? trendPts.value[hoverIdx.value] : null))
+const hoverPointLg = computed(() => (hoverIdxLg.value >= 0 && hoverIdxLg.value < trendPtsLg.value.length ? trendPtsLg.value[hoverIdxLg.value] : null))
+
+function fmtHm(secs: number): string {
+  const h = Math.floor(secs / 3600)
+  const m = Math.round((secs % 3600) / 60)
+  return `${h}h${m ? `${m}m` : ''}`
+}
+
+/** 当天全部健康数据（原始值；没有的标 —）——hover 数据栏用，绝不使用旧值/默认值 */
+const hoverDetail = computed(() => {
+  const p = hoverPoint.value ?? hoverPointLg.value
+  if (!p || !p.rawDay) return null
+  const d = p.rawDay
+  return {
+    date: d.date,
+    rows: [
+      ['步数', d.steps != null ? Number(d.steps).toLocaleString() : '—'],
+      ['睡眠时长', d.sleep?.secs != null ? fmtHm(d.sleep.secs) : '—'],
+      ['睡眠得分', d.sleep?.score != null ? String(d.sleep.score) : '—'],
+      ['静息心率', d.resting_hr != null ? `${d.resting_hr} bpm` : '—'],
+      ['体重', d.weight != null ? `${d.weight} kg` : '—'],
+      ['血氧', d.spo2 != null ? `${d.spo2}%` : '—'],
+      ['摄氧量', d.vo2max != null ? String(d.vo2max) : '—'],
+    ] as Array<[string, string]>,
+  }
+})
+
+/** SVG 鼠标移动 → 换算 viewBox 坐标 → 找最近数据点（小图） */
 function onSvgMove(e: MouseEvent) {
   const svg = e.currentTarget as SVGSVGElement
   const rect = svg.getBoundingClientRect()
   if (!rect.width || !rect.height) return
   const px = ((e.clientX - rect.left) / rect.width) * SVG_W
-  let best = -1
-  let bestDist = Infinity
+  let best = -1; let bestDist = Infinity
   trendPts.value.forEach((p, i) => {
     const d = Math.abs(p.x - px)
-    if (d < bestDist) {
-      bestDist = d
-      best = i
-    }
+    if (d < bestDist) { bestDist = d; best = i }
   })
   hoverIdx.value = best
+  hoverIdxLg.value = -1
 }
+
+/** 大图鼠标移动 */
+function onSvgMoveLg(e: MouseEvent) {
+  const svg = e.currentTarget as SVGSVGElement
+  const rect = svg.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  const px = ((e.clientX - rect.left) / rect.width) * SVG_LG_W
+  let best = -1; let bestDist = Infinity
+  trendPtsLg.value.forEach((p, i) => {
+    const d = Math.abs(p.x - px)
+    if (d < bestDist) { bestDist = d; best = i }
+  })
+  hoverIdxLg.value = best
+  hoverIdx.value = -1
+}
+
 </script>
 
 <template>
@@ -240,7 +327,16 @@ function onSvgMove(e: MouseEvent) {
           <span class="c-big"><span :style="{ color: sleepColor }">{{ sleepText ?? '—' }}</span><span class="sleep-sep">|</span><span :style="sleepScore != null ? { color: scoreColor } : {}">{{ sleepScore ?? '--' }}</span></span>
         </div>
         <div class="cell trend-cell">
-          <span class="c-label">📈 近 7 天步数</span>
+          <div class="trend-head">
+            <span class="c-label">📈 {{ metric.label }}</span>
+            <select v-model="selectedMetric" class="metric-select" title="选择纵轴指标">
+              <option value="steps">步数</option>
+              <option value="sleepSecs">睡眠时长</option>
+              <option value="sleepScore">睡眠得分</option>
+              <option value="restingHr">静息心率</option>
+              <option value="weight">体重</option>
+            </select>
+          </div>
           <div class="chart-wrap" :class="{ large: showTrendLarge }" @click="showTrendLarge = !showTrendLarge" title="点击查看大图">
             <svg
               v-if="trendPts.length"
@@ -279,7 +375,7 @@ function onSvgMove(e: MouseEvent) {
                 :cx="p.x"
                 :cy="p.y"
                 :r="i === trendPts.length - 1 ? 3 : 1.8"
-                :fill="gradeColor(p.steps)"
+                :fill="p.color"
                 :stroke="i === trendPts.length - 1 ? '#fff' : 'none'"
                 stroke-width="1"
               />
@@ -293,9 +389,13 @@ function onSvgMove(e: MouseEvent) {
                 stroke-width="1"
               />
             </svg>
-            <div v-else class="trend-empty">暂无趋势</div>
-            <div v-if="hoverPoint" class="chart-tip">
-              {{ hoverPoint.date }} · {{ hoverPoint.steps.toLocaleString() }} 步
+            <div v-else class="trend-empty">暂无数据</div>
+            <div v-if="hoverDetail" class="chart-tip">
+              <div class="tip-date">{{ hoverDetail.date }}</div>
+              <div v-for="(r, ri) in hoverDetail.rows" :key="ri" class="tip-row">
+                <span class="tip-k">{{ r[0] }}</span>
+                <span class="tip-v">{{ r[1] }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -303,7 +403,12 @@ function onSvgMove(e: MouseEvent) {
 
       <!-- 2026-08-08：趋势大图（点击小图展开，卡片下部显示；再点收起） -->
       <div v-if="showTrendLarge && trendPtsLg.length" class="trend-large">
-        <svg :viewBox="`0 0 ${SVG_LG_W} ${SVG_LG_H}`" class="trend-large-svg">
+        <svg
+          :viewBox="`0 0 ${SVG_LG_W} ${SVG_LG_H}`"
+          class="trend-large-svg"
+          @mousemove="onSvgMoveLg"
+          @mouseleave="hoverIdxLg = -1"
+        >
           <defs>
             <linearGradient v-for="sg in segColorsLg" :key="sg.id" :id="sg.id" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" :stop-color="sg.c1" />
@@ -314,6 +419,16 @@ function onSvgMove(e: MouseEvent) {
               <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
             </linearGradient>
           </defs>
+          <!-- 纵轴刻度线 + 标签 -->
+          <g v-for="(t, ti) in yTicksLg" :key="'y' + ti">
+            <line
+              :x1="12" :y1="t.y" :x2="SVG_LG_W - 8" :y2="t.y"
+              stroke="var(--border-subtle)" stroke-width="0.5" stroke-dasharray="2 3"
+            />
+            <text :x="6" :y="t.y + 3" text-anchor="end" font-size="8" fill="var(--text-secondary)">
+              {{ t.label }}
+            </text>
+          </g>
           <path :d="areaPathLg" fill="url(#trendAreaLg)" />
           <line
             v-for="sg in segColorsLg"
@@ -321,19 +436,13 @@ function onSvgMove(e: MouseEvent) {
             :x1="sg.x1" :y1="sg.y1" :x2="sg.x2" :y2="sg.y2"
             :stroke="`url(#${sg.id})`" stroke-width="2" stroke-linecap="round"
           />
-          <!-- 数值标注 -->
-          <text
-            v-for="p in trendPtsLg"
-            :key="'t' + p.date"
-            :x="p.x" :y="p.y - 8"
-            text-anchor="middle" font-size="9" fill="var(--text-secondary)"
-          >{{ p.label }}</text>
-          <!-- 日期标注 -->
+          <!-- 日期标注（深色可读：半透明深描边 + paint-order） -->
           <text
             v-for="p in trendPtsLg"
             :key="'d' + p.date"
             :x="p.x" :y="SVG_LG_H - 2"
-            text-anchor="middle" font-size="9" fill="var(--text-tertiary)"
+            text-anchor="middle" font-size="9" fill="var(--text-secondary)"
+            stroke="rgba(0,0,0,0.55)" stroke-width="2" paint-order="stroke"
           >{{ p.date }}</text>
           <!-- 点 -->
           <circle
@@ -341,9 +450,15 @@ function onSvgMove(e: MouseEvent) {
             :key="'c' + p.date"
             :cx="p.x" :cy="p.y"
             :r="i === trendPtsLg.length - 1 ? 4 : 2.5"
-            :fill="gradeColor(p.steps)"
+            :fill="p.color"
             :stroke="i === trendPtsLg.length - 1 ? '#fff' : 'none'"
             stroke-width="1"
+          />
+          <!-- hover 高亮点 -->
+          <circle
+            v-if="hoverPointLg"
+            :cx="hoverPointLg.x" :cy="hoverPointLg.y"
+            r="4.5" fill="var(--accent)" stroke="#fff" stroke-width="1.2"
           />
         </svg>
       </div>
@@ -472,17 +587,31 @@ function onSvgMove(e: MouseEvent) {
 .chart-tip {
   position: absolute;
   top: -2px;
-  left: 50%;
-  transform: translate(-50%, -100%);
-  background: var(--bg-solid);
+  right: 0;
+  background: var(--bg-elevated, rgba(20, 20, 24, 0.95));
   border: 1px solid var(--border-main);
-  border-radius: 4px;
-  padding: 2px 6px;
+  border-radius: 6px;
+  padding: 6px 8px;
   font-size: 10px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  pointer-events: none;
+  line-height: 1.5;
   z-index: 5;
+  min-width: 120px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.tip-date { font-weight: 700; margin-bottom: 2px; color: var(--text-primary); }
+.tip-row { display: flex; justify-content: space-between; gap: 10px; }
+.tip-k { color: var(--text-muted); }
+.tip-v { color: var(--text-primary); font-family: 'Courier New', monospace; }
+.trend-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.metric-select {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border-main);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  max-width: 84px;
 }
 .trend-empty {
   font-size: 10px;

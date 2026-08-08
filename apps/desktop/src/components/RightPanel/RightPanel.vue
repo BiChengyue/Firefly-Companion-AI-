@@ -27,14 +27,13 @@ const companion = useCompanionStore()
 
 <style scoped>
 .right-panel {
-  display: flex;
-  flex-direction: column;
+  display: block;         /* 2026-08-08：block 布局滚动最可靠（flex 下滚动高度计算偶发异常 → 划不到底） */
   height: 100%;
-  min-height: 0;          /* 2026-08-08：grid item 默认 min-height:auto 被内容撑开裁掉底部 → 滚动不到底 */
+  min-height: 0;
+  box-sizing: border-box;
   background: var(--bg-surface);
   border-left: 1px solid var(--border-main);
   padding: 16px 14px;
-  gap: 14px;
   overflow-y: auto;
 }
 </style>
