@@ -435,9 +435,16 @@ onMounted(() => {
       </div>
       <div v-if="actionMsg" class="qmsg">{{ actionMsg }}</div>
 
-      <!-- ②c 轨迹地图（点开「轨迹」显示今日轨迹） -->
+      <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
       <div v-if="showTrack" class="track-panel">
-        <div class="track-head">🗺️ 今日轨迹 <a class="track-map-link" :href="trackMapUrl" target="_blank">打开地图 ↗</a></div>
+        <div class="track-head">🗺️ 今日轨迹</div>
+        <iframe
+          v-if="phone?.track?.length"
+          :src="trackMapUrl"
+          class="track-map"
+          loading="lazy"
+          title="百度地图当前位置"
+        />
         <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
           <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
           <circle
@@ -619,9 +626,17 @@ onMounted(() => {
   text-decoration: none;
   font-size: 10px;
 }
+.track-map {
+  width: 100%;
+  height: 140px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  margin-bottom: 4px;
+}
 .track-svg {
   width: 100%;
-  height: 80px;
+  height: 60px;
   display: block;
   background: rgba(0, 0, 0, 0.15);
   border-radius: 4px;
