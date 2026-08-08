@@ -121,7 +121,7 @@ function onSvgMove(e: MouseEvent) {
 <template>
   <div class="health-card">
     <div class="head">
-      <span class="title">健康数据</span>
+      <span class="title">💚 健康数据</span>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 

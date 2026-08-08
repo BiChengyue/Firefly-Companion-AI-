@@ -61,7 +61,7 @@ const resourceBars = computed(() => {
 <template>
   <div class="server-card">
     <div class="head">
-      <span class="title">服务器状态</span>
+      <span class="title">🖥 服务器状态</span>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 

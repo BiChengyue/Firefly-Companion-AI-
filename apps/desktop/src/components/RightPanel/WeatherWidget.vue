@@ -175,7 +175,7 @@ onUnmounted(() => {
         <div class="w-city-row">
           <template v-if="!inputting">
             <span class="w-city" @click="startInput" title="点击切换城市">
-              {{ city || '输入城市' }}
+              ☀️ {{ city || '输入城市' }}
             </span>
             <button class="w-edit" title="切换城市" @click="startInput">✎</button>
           </template>
