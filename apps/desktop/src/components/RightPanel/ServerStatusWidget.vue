@@ -51,6 +51,7 @@ const resourceBars = computed(() => {
     { label: 'CPU', pct: r.cpu ?? 0 },
     { label: '内存', pct: r.mem ?? 0 },
     { label: '磁盘 C', pct: r.disk?.C ?? 0 },
+    ...(typeof r.gpu === 'number' ? [{ label: '显卡', pct: r.gpu }] : []),
   ]
 })
 </script>

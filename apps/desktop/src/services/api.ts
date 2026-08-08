@@ -65,6 +65,7 @@ export interface ServerMonitor {
     mem: number
     disk: { C?: number }
     temp?: number | null
+    gpu?: number
   }
   services: Array<{
     name: string

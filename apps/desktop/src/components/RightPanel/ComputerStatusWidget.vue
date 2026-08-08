@@ -14,7 +14,7 @@ interface SensorState {
   last_at?: number
   screens?: Array<{ monitor: number; name: string; primary: boolean; category: string; streaming?: boolean }>
   focus_monitor?: number
-  system_usage?: { cpu?: number; mem?: number; disk?: Record<string, number> }
+  system_usage?: { cpu?: number; mem?: number; disk?: Record<string, number>; gpu?: number }
   detector_ok?: boolean
   error?: string | null
   today_activities?: Seg[]
@@ -57,13 +57,20 @@ const resourceBars = computed(() => {
     { label: 'CPU', pct: u.cpu ?? 0 },
     { label: '内存', pct: u.mem ?? 0 },
     { label: '磁盘 C', pct: u.disk?.C ?? 0 },
+    ...(typeof u.gpu === 'number' ? [{ label: '显卡', pct: u.gpu }] : []),
   ]
 })
-// 前台进程列表（screens + 焦点标记 + 检测器行）
+// 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
 const procRows = computed(() => {
   const rows: Array<{ name: string; cat: string; focus: boolean }> = []
+  let subIdx = 0
   for (const s of state.value?.screens ?? []) {
-    rows.push({ name: s.name.replace(/^\\.\\.\\\\DISPLAY\d+$/, `屏 ${s.monitor + 1}`), cat: s.category, focus: s.monitor === state.value?.focus_monitor })
+    rows.push({
+      name: s.primary ? '主屏幕' : (subIdx === 0 ? '副屏幕' : `副屏幕 ${subIdx + 1}`),
+      cat: s.category,
+      focus: s.monitor === state.value?.focus_monitor,
+    })
+    if (!s.primary) subIdx++
   }
   if (!rows.length && state.value?.category) {
     rows.push({ name: '主屏', cat: state.value.category ?? 'unknown', focus: true })
@@ -77,13 +84,14 @@ const ringItems = computed(() => {
   const total = items.reduce((a, [, v]) => a + v, 0)
   return { items: items.map(([k, v]) => ({ k, v, pct: total ? v / total : 0 })), total }
 })
-// 活动条（0:00 → now）
+// 活动条（0:00 → 24:00 全长，未来时段黑色）
 const timeline = computed(() => {
   const acts = state.value?.today_activities ?? []
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
-  const now = Date.now()
   const start = t0.getTime() / 1000
-  return { acts, start, now: now / 1000, total: Math.max(1, now / 1000 - start) }
+  const end = start + 86400
+  const now = Date.now() / 1000
+  return { acts, start, end, total: 86400, now }
 })
 
 function fmtMin(sec: number) {
@@ -187,12 +195,13 @@ onMounted(() => {
             :key="i"
             class="tseg"
             :class="s.type"
-            :style="{ width: Math.max(1.2, ((s.end - s.start) / timeline.total) * 100) + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+            :style="{ width: Math.max(0.3, ((s.end - s.start) / timeline.total) * 100) + '%', background: CAT_COLORS[s.type] ?? '#888' }"
             @mouseenter="hoverSeg = s"
           />
-          <div v-if="!timeline.acts.length" class="tseg empty" style="width: 100%; background: #333" />
+          <!-- 未来时段（now → 24:00）黑色 -->
+          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: ((timeline.end - timeline.now) / timeline.total) * 100 + '%' }" />
         </div>
-        <div class="tlabel"><span>0:00</span><span>{{ new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span></div>
+        <div class="tlabel"><span>0:00</span><span>24:00</span></div>
         <div v-if="hoverSeg" class="tooltip">{{ hoverText }}</div>
       </div>
 
@@ -262,6 +271,7 @@ onMounted(() => {
 .timeline { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: #333; }
 .tseg { height: 100%; }
 .tseg.empty { opacity: 0.3; }
+.tseg.future { background: #000 !important; }
 .tlabel { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-tertiary); margin-top: 2px; font-family: 'Courier New', monospace; }
 .tooltip {
   position: absolute; top: 16px; left: 0; right: 0; z-index: 5;
