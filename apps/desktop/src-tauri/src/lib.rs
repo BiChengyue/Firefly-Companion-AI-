@@ -85,7 +85,65 @@ fn save_pet_pos(x: i32, y: i32) {
     let _ = std::fs::write(&path, format!("{x} {y}"));
 }
 
+/// 崩溃日志：panic 写入 %APPDATA%/firefly-desktop/panic.log（定位启动崩溃）
+fn setup_panic_log() {
+    std::panic::set_hook(Box::new(|info| {
+        use std::io::Write;
+        let mut p = std::env::var("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        p.push("firefly-desktop");
+        p.push("panic.log");
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+            let _ = writeln!(f, "[{}] {:?}", chrono_like_now(), info);
+        }
+        eprintln!("panic: {:?}", info);
+    }));
+}
+
+/// 简易时间戳（避免引入 chrono 依赖）
+fn chrono_like_now() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("t+{}s", d.as_secs())
+}
+
+/// Windows 命名互斥体单实例锁：已有一个实例则退出，防多开/残留进程窗口类冲突崩溃
+fn acquire_single_instance() -> bool {
+    unsafe {
+        let name: Vec<u16> = "Local\\firefly-desktop-single-instance\0".encode_utf16().collect();
+        let h = CreateMutexW(std::ptr::null_mut(), false, name.as_ptr());
+        if h.is_null() {
+            return true; // 互斥体创建失败不阻塞启动
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS as u32 {
+            CloseHandle(h);
+            return false;
+        }
+        // 持有句柄直到进程退出（有意泄漏，互斥体随进程结束自动释放）
+        std::mem::forget(h);
+        true
+    }
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateMutexW(lpMutexAttributes: *mut std::ffi::c_void, bInitialOwner: bool, lpName: *const u16) -> *mut std::ffi::c_void;
+    fn GetLastError() -> u32;
+    fn CloseHandle(hObject: *mut std::ffi::c_void) -> bool;
+}
+const ERROR_ALREADY_EXISTS: i32 = 183;
+
 pub fn run() {
+    setup_panic_log();
+    if !acquire_single_instance() {
+        eprintln!("[firefly] another instance already running, exit");
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
