@@ -39,13 +39,13 @@ const CAT_LABELS: Record<string, string> = {
   coding: '写代码', browsing: '浏览网页', communication: '通讯聊天', game: '游戏',
   video: '看视频', document: '文档处理', meeting: '会议', design: '设计',
   writing: '写作', tool: '工具', unknown: '其他', rest: '休息', away: '休息',
-  multi: '多任务', offline: '离线', star_rail: '星铁',
+  multi: '多任务', offline: '离线', star_rail: '星铁', firefly: '流萤',
 }
 const CAT_COLORS: Record<string, string> = {
   coding: '#3b82f6', browsing: '#eab308', communication: '#a855f7', game: '#f97316',
-  video: '#ef4444', document: '#06b6d4', design: '#ec4899', writing: '#84cc16',
+  video: '#ef4444', document: '#0d9488', design: '#ec4899', writing: '#84cc16',
   meeting: '#8b5cf6', tool: '#94a3b8', unknown: '#64748b', rest: '#22c55e', away: '#22c55e',
-  multi: '#eab308', offline: '#9ca3af', star_rail: '#f97316',
+  multi: '#eab308', offline: '#9ca3af', star_rail: '#f97316', firefly: '#06b6d4',
 }
 
 const stale = computed(() => {
