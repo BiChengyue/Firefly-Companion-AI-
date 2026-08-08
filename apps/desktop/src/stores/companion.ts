@@ -23,7 +23,7 @@ export const useCompanionStore = defineStore('companion', () => {
   const thinkingStore = useThinkingStore()
   const passthrough = ref(true)
   const interactionLocked = ref(false)
-  const petLocked = ref(true)
+  const petLocked = ref(false) // T35：默认可拖动（点击即拖拽移动桌宠位置）；TopBar 锁按钮可切回锁定互动
   // 连接与错误状态
   const wsConnected = ref(false)
   const lastError = ref('')

@@ -445,6 +445,7 @@ watch(() => companion.mode, () => { loadMemories() })
 
 .search-input {
   flex: 1;
+  min-width: 0; /* T33：左侧栏窄卡片内允许收缩，避免超出卡片 */
   box-sizing: border-box;
   padding: 5px 20px 5px 8px;
   border: 1px solid var(--border-subtle);
@@ -458,6 +459,7 @@ watch(() => companion.mode, () => { loadMemories() })
 .search-input:focus { border-color: var(--accent); }
 
 .search-btn {
+  flex-shrink: 0; /* T33：窄卡片内按钮不收缩 */
   padding: 4px 8px;
   border: none;
   background: var(--accent);

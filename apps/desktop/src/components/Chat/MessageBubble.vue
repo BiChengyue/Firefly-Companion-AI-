@@ -485,7 +485,7 @@ onUnmounted(() => document.removeEventListener('click', onGlobalClick))
   background: #eef4fb;
   border: 1.5px solid #8fb8d8;
   border-radius: 28px;
-  padding: 14px 24px 14px 100px;
+  padding: 15px 28px 15px 100px;
   min-height: 56px;
   box-shadow: 0 2px 8px rgba(120, 160, 200, 0.1);
   position: relative;
@@ -585,7 +585,7 @@ onUnmounted(() => document.removeEventListener('click', onGlobalClick))
   background: #ffffff;
   border: 1.5px solid #b8c895;
   border-radius: 28px;
-  padding: 14px 100px 14px 24px;
+  padding: 15px 100px 15px 46px;
   min-height: 56px;
   box-shadow: 0 2px 8px rgba(180, 180, 130, 0.08);
   position: relative;
