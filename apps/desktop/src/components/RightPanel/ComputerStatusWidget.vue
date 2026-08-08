@@ -172,7 +172,18 @@ const winWindow = computed(() => {
       const w = ((Math.min(s.end, t.start + winEnd) - Math.max(s.start, t.start + winStart)) / (winEnd - winStart)) * 100
       return { ...s, w }
     })
-  return { winStart, winEnd, segs, mode: winMode.value }
+    .sort((a, b) => a.start - b.start)
+  // 窗口内小空隙（<90s，采样断档间隙）并入前段填色，副条连续无灰缝
+  const filled: typeof segs = []
+  for (const s of segs) {
+    const prev = filled[filled.length - 1]
+    if (prev && s.start - prev.end > 0 && s.start - prev.end < 90) {
+      prev.end = s.start // 前段只延伸到空隙起点，保留 s
+      prev.w = ((Math.min(prev.end, t.start + winEnd) - Math.max(prev.start, t.start + winStart)) / (winEnd - winStart)) * 100
+    }
+    filled.push(s)
+  }
+  return { winStart, winEnd, segs: filled, mode: winMode.value }
 })
 
 // 5 分钟闲置 → 回 auto（30s tick 检查）
