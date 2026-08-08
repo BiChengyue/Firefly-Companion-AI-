@@ -40,12 +40,18 @@ const CAT_LABELS: Record<string, string> = {
   video: '看视频', document: '文档处理', meeting: '会议', design: '设计',
   writing: '写作', tool: '工具', unknown: '其他', rest: '休息', away: '休息',
   multi: '多任务', offline: '离线', star_rail: '星铁', firefly: '流萤',
+  // 手机分类（2026-08-08：配色方案，尽量贴合电脑卡语义）
+  social: '社交', shopping: '购物', reading: '阅读', travel: '出行',
+  finance: '金融', life: '生活', system: '系统',
 }
 const CAT_COLORS: Record<string, string> = {
-  coding: '#3b82f6', browsing: '#eab308', communication: '#a855f7', game: '#f97316',
+  coding: '#3b82f6', browsing: '#f59e0b', communication: '#a855f7', game: '#f97316',
   video: '#ef4444', document: '#0d9488', design: '#ec4899', writing: '#84cc16',
   meeting: '#8b5cf6', tool: '#94a3b8', unknown: '#64748b', rest: '#22c55e', away: '#22c55e',
   multi: '#eab308', offline: '#9ca3af', star_rail: '#f97316', firefly: '#06b6d4',
+  // 手机分类（2026-08-08）
+  social: '#a855f7', shopping: '#ec4899', reading: '#06b6d4', travel: '#3b82f6',
+  finance: '#eab308', life: '#84cc16', system: '#64748b',
 }
 
 const stale = computed(() => {
