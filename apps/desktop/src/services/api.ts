@@ -79,18 +79,49 @@ export interface ServerMonitor {
 /** 拉取服务器状态快照（bus /api/v1/monitor，只读）。失败抛错（调用方降级显示「监控暂不可用」）。
  *  带 X-Bus-Token（与 WS 共用 localStorage `firefly_bus_ws_token`，服务器配置 BUS_TOKEN 时必需）。 */
 export async function getServerMonitor(signal?: AbortSignal): Promise<ServerMonitor> {
+  return requestBus<ServerMonitor>('/api/v1/monitor', signal)
+}
+
+/** bus 只读接口公共请求（带 X-Bus-Token，dev 走 Vite proxy / 生产走 bus base）。 */
+async function requestBus<T>(path: string, signal?: AbortSignal): Promise<T> {
   let token = ''
   try {
     if (typeof localStorage !== 'undefined') token = localStorage.getItem('firefly_bus_ws_token') ?? ''
   } catch {
     // localStorage 不可用 → 不带 token
   }
-  const res = await fetch(`${getBaseBusHttp()}/api/v1/monitor`, {
+  const res = await fetch(`${getBaseBusHttp()}${path}`, {
     headers: token ? { 'X-Bus-Token': token } : {},
     signal,
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
+}
+
+// ── T-31-A2：健康数据（bus /api/v1/fitness(+history)，转发 hub fitness）──
+export interface FitnessDaily {
+  date: string
+  steps?: number | null
+  sleep?: { secs?: number | null; score?: number | null } | null
+  resting_hr?: number | null
+  spo2?: number | null
+  vo2max?: number | null
+  weight?: number | null
+  summary?: string
+}
+
+export interface FitnessHistory {
+  days: FitnessDaily[]
+}
+
+/** 拉取最新健康数据（bus /api/v1/fitness，只读）。失败抛错（调用方降级显示「健康数据暂不可用」）。 */
+export async function getFitness(signal?: AbortSignal): Promise<FitnessDaily> {
+  return requestBus<FitnessDaily>('/api/v1/fitness', signal)
+}
+
+/** 拉取近 N 天健康历史（bus /api/v1/fitness/history?days=N，只读）。 */
+export async function getFitnessHistory(days = 7, signal?: AbortSignal): Promise<FitnessHistory> {
+  return requestBus<FitnessHistory>(`/api/v1/fitness/history?days=${days}`, signal)
 }
 
 /**

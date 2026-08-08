@@ -7,6 +7,7 @@ import ReminderWidget from './ReminderWidget.vue'
 import WeatherWidget from './WeatherWidget.vue'
 import SystemStatusWidget from './SystemStatusWidget.vue'
 import ServerStatusWidget from './ServerStatusWidget.vue'
+import HealthWidget from './HealthWidget.vue'
 import MemoryWidget from './MemoryWidget.vue'
 
 const companion = useCompanionStore()
@@ -20,6 +21,7 @@ const companion = useCompanionStore()
     <WeatherWidget v-if="companion.isDaily" />
     <SystemStatusWidget v-else />
     <ServerStatusWidget />
+    <HealthWidget />
     <MemoryWidget />
   </aside>
 </template>

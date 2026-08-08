@@ -4,6 +4,9 @@
 - POST /api/v1/inbound/desktop   桌宠用户消息 → inbox（source=desktop；实际桌宠走 WS，HTTP 供测试/备用）
 - POST /api/v1/inbound/mobile    手机用户消息 → inbox（source=mobile；契约占位，adapter 未实现）
 - GET  /api/v1/health            探活
+- GET  /api/v1/monitor           服务器状态快照（T-29-A3，本地文件透传）
+- GET  /api/v1/fitness           健康数据最新（T-31-A2，转发 hub fitness-state）
+- GET  /api/v1/fitness/history   健康数据近 N 天（T-31-A2，转发 hub fitness/history）
 
 请求体：{"content": str, "refId"?: str, "meta"?: object}
 响应：{"id": "<inbox message id>", "sequence": {...}, "policy": "fixed|first_reachable"}
@@ -14,8 +17,9 @@ import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
+from bus.event_bridge import resolve_pch_token
 from bus.input_bus import InputBus
 from bus.models import MessageSource
 from bus.store import BusStore
@@ -28,6 +32,8 @@ _SOURCE_BY_PATH = {
 _MAX_BODY = 64 * 1024
 # T-29-A3：服务器状态快照文件（ServerMonitor 每 30s 写，透传返回；env 可覆盖供测试）
 _MONITOR_FILE = os.environ.get("MONITOR_STATUS_FILE", r"C:\ProgramData\firefly-bot\monitor\status.json")
+# T-31-A2：hub 上游（fitness 只读转发；env 可覆盖供测试）
+_PCH_HUB_URL = os.environ.get("PCH_API_URL", "http://127.0.0.1:8901").rstrip("/")
 
 
 def _bus_token() -> str:
@@ -76,6 +82,13 @@ class BusHttpHandler(BaseHTTPRequestHandler):
             self._json(200, {"status": "ok", "service": "bus"})
         elif parsed.path == "/api/v1/monitor":
             self._serve_monitor()
+        elif parsed.path == "/api/v1/fitness":
+            self._proxy_hub("/api/v1/fitness-state")
+        elif parsed.path == "/api/v1/fitness/history":
+            days = parse_qs(parsed.query).get("days", ["7"])[0]
+            if not days.isdigit() or not (1 <= int(days) <= 90):
+                days = "7"
+            self._proxy_hub("/api/v1/fitness/history", f"days={days}")
         else:
             self._json(404, {"error": {"code": "NOT_FOUND", "message": "unknown endpoint"}})
 
@@ -90,6 +103,40 @@ class BusHttpHandler(BaseHTTPRequestHandler):
                 raw = f.read()
         except OSError:
             self._json(404, {"error": "monitor unavailable"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _proxy_hub(self, hub_path: str, query: str = ""):
+        """只读转发到 hub（T-31-A2：fitness 最新 / 历史）。
+
+        鉴权与入站 API 一致（X-Bus-Token 或回环放行）；hub token 复用事件桥同源
+        （PCH_TOKEN env → pch.token 文件，见 resolve_pch_token）。
+        hub 不可达 / 401 / 404（端点未实现或无数据）→ 502 降级，前端显示「健康数据暂不可用」。
+        """
+        if not _auth_ok(self):
+            self._json(401, {"error": {"code": "UNAUTHORIZED", "message": "missing or bad X-Bus-Token"}})
+            return
+        import urllib.error
+        import urllib.request
+
+        tok = resolve_pch_token()
+        if not tok:
+            self._json(502, {"error": {"code": "UPSTREAM_AUTH", "message": "bus 未配置 PCH token，无法转发"}})
+            return
+        url = _PCH_HUB_URL + hub_path + (f"?{query}" if query else "")
+        req = urllib.request.Request(url, headers={"X-PCH-Token": tok})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as e:
+            self._json(502, {"error": {"code": "UPSTREAM_ERROR", "message": f"hub 返回 HTTP {e.code}"}})
+            return
+        except Exception as e:
+            self._json(502, {"error": {"code": "UPSTREAM_DOWN", "message": f"hub 不可达: {e}"}})
             return
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")

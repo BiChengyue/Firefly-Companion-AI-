@@ -25,6 +25,8 @@ export default defineConfig({
       // 把 API / 静态资源请求代理到 Python 后端，避免 CORS 跨域问题
       // T-29-A3：monitor 走 bus（8766），比 /api 更长的前缀优先匹配
       '/api/v1/monitor': 'http://100.111.201.71:8766',
+      // T-31-A2：fitness（最新 + 历史）走 bus（8766）
+      '/api/v1/fitness': 'http://100.111.201.71:8766',
       '/api': 'http://100.111.201.71:8765',
       '/health': 'http://100.111.201.71:8765',
       '/memes': 'http://100.111.201.71:8765',
