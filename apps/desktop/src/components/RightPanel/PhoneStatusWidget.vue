@@ -477,6 +477,18 @@ watch(showTrack, (v) => {
   if (v) window.setTimeout(initLeafletMap, 120) // 等容器挂载后初始化
   else destroyLeafletMap()
 })
+// 2026-08-08：文件列表 10s 自动刷新（面板打开时启动，关闭时清理；慢请求防重叠）
+let fsTimer: ReturnType<typeof setInterval> | null = null
+watch(showFiles, (v) => {
+  if (v && !fsTimer) {
+    fsTimer = setInterval(() => {
+      if (!fsLoading.value) fsList(fsPath.value)
+    }, 10000)
+  } else if (!v && fsTimer) {
+    clearInterval(fsTimer)
+    fsTimer = null
+  }
+})
 </script>
 
 <template>
