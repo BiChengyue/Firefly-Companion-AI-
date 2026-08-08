@@ -361,20 +361,6 @@ async function runPhoneAction(a: { key: string; label: string; local?: boolean; 
 }
 
 /** 轨迹迷你图（SVG 按经纬度归一化连线；数据 mock，接口接入后 phone.track 替换） */
-const trackSvg = computed(() => {
-  const pts = phone.value?.track ?? []
-  if (pts.length < 2) return { path: '', w: 0, h: 0 }
-  const lats = pts.map((p) => p.lat)
-  const lngs = pts.map((p) => p.lng)
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats)
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
-  const W = 240, H = 80, PAD = 8
-  const sx = (lng: number) => PAD + ((lng - minLng) / (maxLng - minLng || 1)) * (W - PAD * 2)
-  const sy = (lat: number) => H - PAD - ((lat - minLat) / (maxLat - minLat || 1)) * (H - PAD * 2)
-  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.lng).toFixed(1)},${sy(p.lat).toFixed(1)}`).join(' ')
-  const dots = pts.map((p, i) => ({ x: sx(p.lng).toFixed(1), y: sy(p.lat).toFixed(1), first: i === 0, last: i === pts.length - 1 }))
-  return { path, dots, w: W, h: H }
-})
 
 // ── 2026-08-08d：Leaflet 轨迹地图（成熟库：平滑拖动/缩放/惯性/瓦片缓存）——高德瓦片 GCJ-02 与定位一致 ──
 let trackMap: L.Map | null = null
@@ -471,15 +457,6 @@ watch(showTrack, (v) => {
       <div v-if="showTrack" class="track-panel">
         <div class="track-head">🗺️ 今日轨迹 <span class="track-tip">滚轮缩放 · 拖动平移</span></div>
         <div v-if="phone?.track?.length" ref="trackMapEl" class="track-map" />
-        <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
-          <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
-          <circle
-            v-for="(d, i) in trackSvg.dots"
-            :key="i"
-            :cx="d.x" :cy="d.y" r="3"
-            :fill="d.first ? '#22c55e' : (d.last ? '#ef4444' : '#fff')"
-          />
-        </svg>
         <div v-else class="track-hint">暂无轨迹数据</div>
       </div>
 
@@ -663,13 +640,6 @@ watch(showTrack, (v) => {
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.15);
   margin-bottom: 4px;
-}
-.track-svg {
-  width: 100%;
-  height: 60px;
-  display: block;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
 }
 .track-hint {
   font-size: 10px;
