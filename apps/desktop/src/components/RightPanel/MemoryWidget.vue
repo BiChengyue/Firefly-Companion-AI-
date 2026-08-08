@@ -398,7 +398,7 @@ watch(() => companion.mode, () => { loadMemories() })
 
 <style scoped>
 .memory-widget {
-  background: var(--bg-surface);
+  background: var(--bg-solid); /* T32 透明修复：浮层内必须不透明 */
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 12px;

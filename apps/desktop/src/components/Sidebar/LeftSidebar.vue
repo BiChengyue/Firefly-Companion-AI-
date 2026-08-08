@@ -6,11 +6,19 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useCompanionStore } from '@/stores/companion'
 import SettingsModal from '@/components/Settings/SettingsModal.vue'
+import ReminderWidget from '@/components/RightPanel/ReminderWidget.vue'
+import MemoryWidget from '@/components/RightPanel/MemoryWidget.vue'
 import { pickFolder } from '@/services/folderPicker'
 import { useTaskSync } from '@/composables/useTaskSync'
 
 const companion = useCompanionStore()
 const { sortedTasks, toggleTask, deleteTask, addTask, onExternalChange } = useTaskSync()
+
+// ── T32：提醒折叠区（右侧 ReminderWidget 挪入，默认折叠）──────
+const showReminders = ref(false)
+
+// ── T32：记忆管理入口（右侧 MemoryWidget 挪入，弹窗展示）─────
+const showMemory = ref(false)
 
 // ── 设置弹窗 ────────────────────────────────────────────
 const showSettings = ref(false)
@@ -314,6 +322,19 @@ const userAvatarChar = computed(() =>
 
     <hr class="sep" />
 
+    <!-- T32：提醒折叠区（ReminderWidget 挪入，默认折叠）
+         ⚠ 用 v-show 而非 v-if：scheduler 的 checkReminders 依赖组件 onMounted，
+         折叠也必须保持挂载，提醒才照常触发 -->
+    <div class="reminder-collapse">
+      <div class="collapse-head" @click="showReminders = !showReminders">
+        <span>⏰ 提醒</span>
+        <span class="collapse-arrow">{{ showReminders ? '▾' : '▸' }}</span>
+      </div>
+      <div v-show="showReminders" class="collapse-body">
+        <ReminderWidget />
+      </div>
+    </div>
+
     <!-- 任务历史面板 -->
     <div v-if="showTaskHistory" class="history-panel">
       <div class="history-header">
@@ -376,6 +397,11 @@ const userAvatarChar = computed(() =>
     </div>
     <!-- /sidebar-scroll -->
 
+    <!-- T32：记忆管理入口（右侧 MemoryWidget 挪入；footer 上方） -->
+    <button class="memory-entry" @click="showMemory = true" title="搜索/管理记忆">
+      🧠 记忆管理
+    </button>
+
     <!-- 底部用户区（固定底部，不随列表滚动） -->
     <div class="sidebar-footer">
       <div class="user-profile" @click="handleOpenSettings" title="点击打开系统设置">
@@ -389,6 +415,16 @@ const userAvatarChar = computed(() =>
   <!-- 设置弹窗（Teleport 到 body 避免 sidebar overflow 裁剪） -->
   <Teleport to="body">
     <SettingsModal v-if="showSettings" @close="showSettings = false" />
+    <!-- T32：记忆管理弹窗（MemoryWidget 挪入左栏后以弹窗展示） -->
+    <div v-if="showMemory" class="memory-modal" @click.self="showMemory = false">
+      <div class="memory-modal-body">
+        <div class="memory-modal-head">
+          <span>🧠 记忆管理</span>
+          <button class="memory-modal-close" title="关闭" @click="showMemory = false">✕</button>
+        </div>
+        <MemoryWidget />
+      </div>
+    </div>
   </Teleport>
 </template>
 
@@ -886,4 +922,85 @@ const userAvatarChar = computed(() =>
 }
 
 .user-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+
+/* ── T32：提醒折叠区 + 记忆入口 + 记忆弹窗 ────────────────── */
+.reminder-collapse {
+  margin: 2px 0 4px;
+}
+.collapse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 5px 4px;
+  border-radius: var(--radius-sm);
+  user-select: none;
+}
+.collapse-head:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+.collapse-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.collapse-body {
+  padding: 2px 0 4px;
+}
+.memory-entry {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.memory-entry:hover {
+  color: var(--color-primary);
+  background: var(--bg-card);
+}
+.memory-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.memory-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.memory-modal-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.memory-modal-close:hover { color: var(--color-danger, #ef4444); }
+.memory-modal-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--bg-solid); /* T32 透明修复：--bg-surface 深色主题是 rgba 半透明，浮层必须不透明 */
+  border: 1px solid var(--border-main);
+  width: min(560px, 90vw);
+}
 </style>

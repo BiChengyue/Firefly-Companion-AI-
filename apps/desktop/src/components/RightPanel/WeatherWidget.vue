@@ -1,12 +1,14 @@
 <script setup lang="ts">
-/** 天气小组件 — 通过后端 /api/weather 代理获取天气 (open-meteo 免费源)，支持城市输入，5 分钟本地缓存。 */
-import { ref, onMounted, nextTick } from 'vue'
+/** 天气小组件 — 通过后端 /api/weather 代理获取天气 (open-meteo 免费源)，支持城市输入，5 分钟本地缓存。
+ *  T32：紧凑一行样式（图标+温度+描述+城市）+ 显示更新时间（HH:MM）+ 每小时刷新（3600s）。 */
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { getApiBase } from '@/services/api'
 
 const temp = ref('--')
 const icon = ref('🌤')
 const desc = ref('加载中…')
 const city = ref('')
+const lastUpdated = ref('') // T32：更新时间 HH:MM
 const inputting = ref(false)
 const loading = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -14,8 +16,11 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const CACHE_KEY = 'firefly_weather_cache'
 const SAVED_CITY_KEY = 'firefly_weather_last_city'
 const CACHE_TTL = 5 * 60 * 1000
+// T32：每小时刷新（原 30s 未实现，现统一每小时）
+const REFRESH_MS = 3600 * 1000
 let fetchVersion = 0
 let savedCityName = ''
+let timer: ReturnType<typeof setInterval> | null = null
 
 interface WeatherCache {
   temp: string; icon: string; desc: string; city: string; ts: number
@@ -50,20 +55,20 @@ function weatherIconCN(type: string): string {
   return '🌤'
 }
 
+function nowHHMM(): string {
+  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
 async function fetchWeather(cityName: string, silent = false) {
   const myVersion = ++fetchVersion
   if (!silent) loading.value = true
 
-  // T-20 切单轨配套（2026-08-06）：原硬编码 127.0.0.1:8765（后端同机假设）在
-  // 桌宠=总线客户端改造后失效（后端在 Tailnet 服务器）。改用 api.ts 的 getApiBase()：
-  // dev(vite proxy) / 生产(Tailnet 默认 + localStorage firefly_http_base 覆盖) 统一。
+  // T-20 切单轨配套：用 api.ts 的 getApiBase()（dev vite proxy / 生产 Tailnet 统一）
   const apiUrl = `${getApiBase()}/api/weather?city=${encodeURIComponent(cityName)}`
   try {
-    console.log('[Weather] 请求:', apiUrl)
     const res = await fetch(apiUrl, {
       signal: AbortSignal.timeout(12000),
     })
-    console.log('[Weather] 响应状态:', res.status)
     if (!res.ok) {
       const errData = await res.json().catch(() => ({})) as { detail?: string }
       throw new Error(errData.detail || `HTTP ${res.status}`)
@@ -76,6 +81,7 @@ async function fetchWeather(cityName: string, silent = false) {
     temp.value = `${data.temp}°C`
     desc.value = data.type || '--'
     icon.value = weatherIconCN(data.type)
+    lastUpdated.value = nowHHMM() // T32：记录更新时间
     saveCache(cityName)
   } catch (err: unknown) {
     if (myVersion !== fetchVersion) return
@@ -107,7 +113,6 @@ function confirmCity() {
     cancelInput()
     return
   }
-  // 立即持久化城市名（不论 fetch 成败）
   savedCityName = trimmed
   localStorage.setItem(SAVED_CITY_KEY, trimmed)
   fetchWeather(trimmed)
@@ -143,165 +148,166 @@ onMounted(async () => {
     desc.value = cached.desc
     city.value = cached.city
     savedCityName = cached.city
+    lastUpdated.value = cached.ts ? new Date(cached.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''
     fetchWeather(cached.city, true) // 后台静默更新
   } else if (savedCityName) {
     await fetchWeather(savedCityName)
   } else {
-    // 首次使用：未保存城市，等待用户手动输入（open-meteo 无 IP 定位功能）
     loading.value = false
   }
+
+  // T32：每小时刷新一次
+  timer = setInterval(() => {
+    if (savedCityName) fetchWeather(savedCityName, true)
+  }, REFRESH_MS)
+})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
 })
 </script>
 
 <template>
-  <div class="card">
-    <!-- 城市行 -->
-    <div class="city-row" :class="{ active: inputting }">
-      <!-- 显示模式：城市名 + 编辑按钮 -->
-      <template v-if="!inputting">
-        <span class="city-label" @click="startInput" title="点击切换城市">
-          {{ city || '点击输入城市' }}
-        </span>
-        <button class="edit-btn" title="切换城市" @click="startInput">✎</button>
-      </template>
-
-      <!-- 编辑模式：输入框 + 确认/取消按钮 -->
-      <template v-else>
-        <input
-          ref="inputRef"
-          v-model="city"
-          class="city-input"
-          placeholder="输入城市名"
-          @keydown="onInputKeydown"
-        />
-        <button class="action-btn confirm" title="确认" @click="confirmCity">✓</button>
-        <button class="action-btn cancel" title="取消" @click="cancelInput">✕</button>
-      </template>
+  <div class="card compact" :class="{ dim: loading }">
+    <div class="w-layout">
+      <!-- 左列：城市（上）+ 更新时间（下） -->
+      <div class="w-left">
+        <div class="w-city-row">
+          <template v-if="!inputting">
+            <span class="w-city" @click="startInput" title="点击切换城市">
+              {{ city || '输入城市' }}
+            </span>
+            <button class="w-edit" title="切换城市" @click="startInput">✎</button>
+          </template>
+          <template v-else>
+            <input
+              ref="inputRef"
+              v-model="city"
+              class="w-input"
+              placeholder="城市"
+              @keydown="onInputKeydown"
+            />
+            <button class="w-ok" title="确认" @click="confirmCity">✓</button>
+            <button class="w-cancel" title="取消" @click="cancelInput">✕</button>
+          </template>
+        </div>
+        <div class="w-foot">
+          <span v-if="lastUpdated">更新于 {{ lastUpdated }}</span>
+          <span v-else>更新于 —</span>
+          <span v-if="loading" class="w-spin">⟳</span>
+        </div>
+      </div>
+      <!-- 右列：具体天气信息（更大字） -->
+      <div class="w-right">
+        <span class="w-icon">{{ icon }}</span>
+        <span class="w-temp">{{ temp }}</span>
+        <span class="w-desc">{{ desc }}</span>
+      </div>
     </div>
-
-    <!-- 天气信息 -->
-    <div class="weather-row" :class="{ dim: loading }">
-      <span class="temp">{{ temp }}</span>
-      <span class="icon">{{ icon }}</span>
-    </div>
-    <div class="label">{{ desc }}</div>
   </div>
 </template>
 
 <style scoped>
+/* T32：紧凑卡片（一行），缩小占位 */
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
-  text-align: center;
+  padding: 8px 10px;
 }
+.card.dim { opacity: 0.6; }
 
-/* 城市行 */
-.city-row {
+/* T33：左右布局——左列城市+时间（小字），右列天气信息（大字号） */
+.w-layout {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+}
+.w-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.w-city-row {
+  display: flex;
+  align-items: center;
   gap: 4px;
-  margin-bottom: 6px;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s;
-  min-height: 26px;
+  min-width: 0;
 }
-.city-row.active {
-  background: var(--bg-card);
+.w-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
 }
-.city-label {
-  font-size: 13px;
+.w-icon { font-size: 22px; flex-shrink: 0; } /* T33：右列天气信息放大 */
+.w-temp {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.w-desc {
+  font-size: 13px; /* T33：右列天气信息放大 */
   color: var(--text-secondary);
-  cursor: pointer;
-  max-width: 100px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 4px;
-  border-bottom: 1px dashed transparent;
-  transition: color 0.15s, border-color 0.15s;
+  flex: 1;
+  min-width: 0;
 }
-.city-label:hover {
+.w-city {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 1px 3px;
+  border-bottom: 1px dashed transparent;
+}
+.w-city:hover {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
 }
-.city-input {
+.w-edit,
+.w-ok,
+.w-cancel {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 3px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.w-edit:hover { color: var(--color-primary); }
+.w-ok { color: var(--color-success, #4caf50); }
+.w-cancel:hover { color: var(--color-danger, #ef4444); }
+.w-input {
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--color-primary);
   outline: none;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-primary);
-  text-align: center;
-  width: 80px;
-  padding: 2px 0;
+  width: 70px;
+  padding: 1px 0;
   font-family: inherit;
 }
-.city-input::placeholder {
-  color: var(--text-muted);
-  opacity: 0.7;
-}
-
-/* 按钮 */
-.edit-btn,
-.action-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-  line-height: 1;
-  border-radius: 3px;
-  transition: color 0.15s, background 0.15s;
-  flex-shrink: 0;
-}
-.edit-btn {
-  color: var(--text-muted);
-}
-.edit-btn:hover {
-  color: var(--color-primary);
-  background: var(--bg-card);
-}
-.action-btn.confirm {
-  color: var(--color-success, #4caf50);
-}
-.action-btn.confirm:hover {
-  background: var(--bg-card);
-}
-.action-btn.cancel {
-  color: var(--text-muted);
-}
-.action-btn.cancel:hover {
-  color: var(--color-danger, #ef4444);
-  background: var(--bg-card);
-}
-
-/* 天气展示 */
-.weather-row {
+.w-foot {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: opacity 0.3s;
-}
-.weather-row.dim {
-  opacity: 0.5;
-}
-.temp {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.icon {
-  font-size: 28px;
-}
-.label {
-  margin-top: 2px;
-  font-size: 12px;
+  justify-content: space-between;
+  font-size: 9px;
   color: var(--text-muted);
-  min-height: 18px;
+  font-family: 'Courier New', monospace;
+  margin-top: 4px;
 }
+.w-spin { animation: wspin 1s linear infinite; }
+@keyframes wspin { to { transform: rotate(360deg); } }
 </style>

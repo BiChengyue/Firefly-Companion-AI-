@@ -8,6 +8,7 @@
   /* ── 背景与表面 ── */
   --bg-root: #eef5f0;
   --bg-surface: #ffffff;
+  --bg-solid: #ffffff; /* 不透明版（弹窗/浮层用——T32 记忆弹窗透明修复） */
   --bg-surface-hover: #f5f9f7;
   --bg-elevated: rgba(255, 255, 255, 0.92);
   --bg-glass: rgba(255, 255, 255, 0.7);
@@ -66,6 +67,7 @@
 .chat-client-root.work {
   --bg-root: #0a0301;
   --bg-surface: rgba(12, 4, 1, 0.96);
+  --bg-solid: #0c0401; /* 不透明版（弹窗/浮层用——T32 记忆弹窗透明修复） */
   --bg-surface-hover: rgba(20, 6, 2, 0.96);
   --bg-elevated: rgba(14, 4, 1, 0.94);
   --bg-glass: rgba(10, 3, 1, 0.8);
