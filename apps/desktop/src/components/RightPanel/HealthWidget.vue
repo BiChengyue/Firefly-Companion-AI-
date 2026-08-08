@@ -138,7 +138,7 @@ function onSvgMove(e: MouseEvent) {
         </div>
         <div class="cell">
           <span class="c-label">💓 心率</span>
-          <span class="c-val">{{ hrText }}</span>
+          <span class="c-big">{{ hrText }}</span>
         </div>
         <div class="cell">
           <span class="c-label">😴 睡眠</span>
