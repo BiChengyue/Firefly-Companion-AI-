@@ -71,7 +71,6 @@ const phone = ref<PhoneState | null>({
 const error = ref('')
 const lastTs = ref(Date.now())
 const loading = ref(false)
-let refreshVersion = 0
 
 /** 勿扰开关（本地 UI；未来调 bus 下发） */
 const dndOverride = ref<boolean | null>(null)
