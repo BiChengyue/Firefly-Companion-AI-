@@ -66,6 +66,34 @@ const stepsText = computed<string>(() => {
   return s != null ? Number(s).toLocaleString() : '—'
 })
 
+/** 2026-08-08：步数健康分级色（≥8000 绿 / ≥5000 黄 / <5000 红）——与评分同机制 */
+const stepsColor = computed<string>(() => {
+  const v = fitness.value?.steps
+  if (v == null) return 'var(--text-primary)'
+  if (Number(v) >= 8000) return '#22c55e'
+  if (Number(v) >= 5000) return '#eab308'
+  return '#ef4444'
+})
+
+/** 2026-08-08：静息心率分级色（55-85 绿 / 50-95 黄 / 其余红） */
+const hrColor = computed<string>(() => {
+  const v = restingHr.value
+  if (v == null) return 'var(--text-primary)'
+  if (v >= 55 && v <= 85) return '#22c55e'
+  if (v >= 50 && v <= 95) return '#eab308'
+  return '#ef4444'
+})
+
+/** 2026-08-08：睡眠时长分级色（7-9h 绿 / ≥6h 黄 / <6h 红，成人推荐） */
+const sleepColor = computed<string>(() => {
+  const s = fitness.value?.sleep?.secs
+  if (s == null) return 'var(--text-primary)'
+  const h = s / 3600
+  if (h >= 7 && h <= 9) return '#22c55e'
+  if (h >= 6) return '#eab308'
+  return '#ef4444'
+})
+
 // ── T32：近 7 天步数 SVG 折线图（手绘 polyline，不引图表库；缺失天跳过）──
 const SVG_W = 120
 const SVG_H = 42
@@ -90,6 +118,15 @@ const trendPts = computed(() => {
 const polyPoints = computed(() =>
   trendPts.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
 )
+
+// 2026-08-08：趋势面积路径（折线下渐变填充）
+const areaPath = computed(() => {
+  const pts = trendPts.value
+  if (!pts.length) return ''
+  const first = pts[0]
+  const last = pts[pts.length - 1]
+  return `${polyPoints.value} L ${last.x.toFixed(1)},${SVG_H} L ${first.x.toFixed(1)},${SVG_H} Z`
+})
 
 // ── T33：hover 查看具体数据（鼠标移到折线附近 → 显示日期+步数）──
 const hoverIdx = ref(-1)
@@ -134,16 +171,16 @@ function onSvgMove(e: MouseEvent) {
       <div class="grid2">
         <div class="cell">
           <span class="c-label">🚶 步数</span>
-          <span class="c-big">{{ stepsText }}</span>
+          <span class="c-big" :style="{ color: stepsColor }">{{ stepsText }}</span>
         </div>
         <div class="cell">
           <span class="c-label">💓 心率</span>
-          <span class="c-big">{{ hrText }}</span>
+          <span class="c-big" :style="{ color: hrColor }">{{ hrText }}</span>
         </div>
         <div class="cell">
           <span class="c-label">😴 睡眠</span>
           <!-- 2026-08-08：取消评分分行——合并为 时长|评分 单行（分隔符弱色，不跟两边同色） -->
-          <span class="c-big">{{ sleepText ?? '—' }}<span class="sleep-sep">|</span><span :style="sleepScore != null ? { color: scoreColor } : {}">{{ sleepScore ?? '--' }}</span></span>
+          <span class="c-big"><span :style="{ color: sleepColor }">{{ sleepText ?? '—' }}</span><span class="sleep-sep">|</span><span :style="sleepScore != null ? { color: scoreColor } : {}">{{ sleepScore ?? '--' }}</span></span>
         </div>
         <div class="cell trend-cell">
           <span class="c-label">📈 近 7 天步数</span>
@@ -156,21 +193,35 @@ function onSvgMove(e: MouseEvent) {
               @mousemove="onSvgMove"
               @mouseleave="hoverIdx = -1"
             >
+              <defs>
+                <!-- 2026-08-08：趋势彩色化——折线渐变 + 面积渐变 -->
+                <linearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="var(--accent)" />
+                  <stop offset="100%" stop-color="#22d3ee" />
+                </linearGradient>
+                <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28" />
+                  <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <path :d="areaPath" fill="url(#trendArea)" />
               <polyline
                 :points="polyPoints"
                 fill="none"
-                stroke="var(--accent)"
-                stroke-width="1.5"
+                stroke="url(#trendLine)"
+                stroke-width="1.6"
                 stroke-linejoin="round"
                 stroke-linecap="round"
               />
               <circle
-                v-for="p in trendPts"
+                v-for="(p, i) in trendPts"
                 :key="p.date"
                 :cx="p.x"
                 :cy="p.y"
-                r="1.8"
-                fill="var(--accent)"
+                :r="i === trendPts.length - 1 ? 3 : 1.8"
+                :fill="i === trendPts.length - 1 ? '#22d3ee' : 'var(--accent)'"
+                :stroke="i === trendPts.length - 1 ? '#fff' : 'none'"
+                stroke-width="1"
               />
               <circle
                 v-if="hoverPoint"
