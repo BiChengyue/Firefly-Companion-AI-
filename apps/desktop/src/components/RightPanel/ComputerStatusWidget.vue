@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 电脑本地状态卡（A3）— 直接读本机 sensor 采集器落盘的 computer_sensor_state.json（不走 hub）。
- *  60s 自动刷新；读不到（sensor 未运行/未装）显示「本地监测未运行」。 */
+ *  60s 自动刷新 + 手动刷新按钮；读不到（sensor 未运行/未装）显示「本地监测未运行」。 */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -10,13 +10,17 @@ interface SensorState {
   video?: string | null
   sitting_minutes?: number
   last_at?: number
+  sitting_last_active_at?: number
   error?: string | null
+  fail_streak?: number
 }
 
 const state = ref<SensorState | null>(null)
 const error = ref('')
 const lastTs = ref(0)
+const loading = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
+let refreshVersion = 0
 
 const CAT_LABELS: Record<string, string> = {
   coding: '写代码',
@@ -40,15 +44,40 @@ const sitting = computed(() => {
   const s = state.value?.sitting_minutes
   return typeof s === 'number' && s >= 1 ? Math.round(s) : 0
 })
+// 空闲时长：上次活动时间距今（近似；sitting_last_active_at 是坐姿活跃时刻）
+const idleMin = computed(() => {
+  const t = state.value?.sitting_last_active_at
+  if (!t) return 0
+  return Math.max(0, Math.round((Date.now() / 1000 - t) / 60))
+})
+const lastAtAgo = computed(() => {
+  const t = state.value?.last_at
+  if (!t) return ''
+  const min = Math.max(0, Math.round((Date.now() / 1000 - t) / 60))
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  return `${Math.round(min / 60)} 小时前`
+})
+const sensorOk = computed(() => {
+  const s = state.value
+  if (!s) return false
+  if (s.error) return false
+  return (s.fail_streak ?? 0) === 0
+})
 
 async function refresh() {
+  const myVersion = ++refreshVersion
+  loading.value = true
   try {
     const raw = await invoke<string>('read_sensor_state')
+    if (myVersion !== refreshVersion) return
     state.value = raw ? JSON.parse(raw) : null
     error.value = ''
     lastTs.value = Date.now()
   } catch {
-    error.value = '本地监测未运行'
+    if (myVersion === refreshVersion) error.value = '本地监测未运行'
+  } finally {
+    if (myVersion === refreshVersion) loading.value = false
   }
 }
 
@@ -62,84 +91,147 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="card compact computer-card">
-    <div class="card-head">
-      <span class="card-title">🖥 电脑状态</span>
-      <span class="card-sub">{{ stale ? '离开/休眠' : (state ? '本地' : '') }}</span>
+  <div class="computer-card">
+    <div class="head">
+      <span class="title">🖥 电脑状态</span>
+      <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 
-    <div v-if="error" class="empty">{{ error }}</div>
-    <div v-else-if="!state" class="empty">暂未获取到本地状态</div>
-    <div v-else class="body">
-      <div class="row main">
+    <div v-if="error" class="unavailable">{{ error }}</div>
+
+    <template v-else-if="state">
+      <div class="main-row">
         <span class="cat">{{ label }}</span>
         <span v-if="state.game" class="game">《{{ state.game }}》</span>
-        <span v-if="state.video" class="video">🎬 {{ state.video }}</span>
+        <span v-if="stale" class="stale-mark">离开/休眠</span>
       </div>
-      <div class="row sub">
-        <span v-if="sitting >= 30" class="sit">已坐 {{ sitting }} 分钟</span>
-        <span v-else-if="sitting > 0" class="sit">坐 {{ sitting }} 分钟</span>
-        <span v-if="lastTs" class="ts">更新于 {{ new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
-      </div>
-    </div>
+      <div v-if="state.video" class="video">🎬 {{ state.video }}</div>
+
+      <ul class="details">
+        <li v-if="sitting >= 1">
+          <span class="k">久坐</span>
+          <span class="v" :class="{ warn: sitting >= 30 }">{{ sitting }} 分钟</span>
+        </li>
+        <li>
+          <span class="k">空闲</span>
+          <span class="v">{{ idleMin }} 分钟</span>
+        </li>
+        <li>
+          <span class="k">数据</span>
+          <span class="v">{{ lastAtAgo }}</span>
+        </li>
+        <li>
+          <span class="k">传感器</span>
+          <span class="v" :class="sensorOk ? 'ok' : 'bad'">
+            {{ sensorOk ? '正常' : state.error || `异常(${state.fail_streak})` }}
+          </span>
+        </li>
+      </ul>
+
+      <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }}</div>
+    </template>
+
+    <div v-else class="unavailable">暂未获取到本地状态</div>
   </div>
 </template>
 
 <style scoped>
-.computer-card .card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-.card-title {
+.computer-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
   font-size: 12px;
+  color: var(--text-secondary);
+}
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.title {
   font-weight: 700;
+  font-size: 12px;
   color: var(--text-primary);
 }
-.card-sub {
-  font-size: 10px;
+.refresh-btn {
+  border: none;
+  background: transparent;
   color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
 }
-.empty {
+.refresh-btn:hover {
+  color: var(--accent-strong);
+}
+.unavailable {
   font-size: 11px;
   color: var(--text-tertiary);
   padding: 4px 0;
 }
-.body .row {
+.main-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-}
-.row.main {
   margin-bottom: 4px;
 }
 .cat {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--accent-strong);
 }
 .game {
   font-size: 12px;
   color: var(--text-primary);
 }
+.stale-mark {
+  font-size: 10px;
+  color: var(--warn, #c07a1f);
+  border: 1px solid var(--warn, #c07a1f);
+  border-radius: 8px;
+  padding: 0 6px;
+}
 .video {
   font-size: 11px;
   color: var(--text-secondary);
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: 4px;
 }
-.row.sub {
-  font-size: 11px;
-  color: var(--text-secondary);
+.details {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-.sit {
+.details li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.details li:last-child {
+  border-bottom: none;
+}
+.k {
+  color: var(--text-tertiary);
+}
+.v.warn {
   color: var(--warn, #c07a1f);
+  font-weight: 600;
 }
-.ts {
+.v.ok {
+  color: var(--ok, #2e9e5b);
+}
+.v.bad {
+  color: #c0392b;
+}
+.foot {
+  margin-top: 6px;
+  font-size: 10px;
   color: var(--text-tertiary);
 }
 </style>
