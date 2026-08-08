@@ -17,13 +17,20 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
-                if let Some(w) = app.get_webview_window("pet") {
+                // 2026-08-08：同时恢复主窗口 + 桌宠（此前只有 pet，主窗口关闭后无法重开）
+                if let Some(w) = app.get_webview_window("main") {
                     let _ = w.show();
                     let _ = w.set_focus();
+                }
+                if let Some(w) = app.get_webview_window("pet") {
+                    let _ = w.show();
                     let _ = w.set_always_on_top(true);
                 }
             }
             "hide" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
                 if let Some(w) = app.get_webview_window("pet") {
                     let _ = w.hide();
                 }

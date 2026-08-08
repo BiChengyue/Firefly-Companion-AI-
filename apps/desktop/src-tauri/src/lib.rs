@@ -225,6 +225,18 @@ pub fn run() {
                 });
             }
 
+            // 2026-08-08：main 主窗口关闭 = 隐藏而非退出（伴侣常驻，托盘可恢复）
+            // 修复：关闭主窗口后无入口重开，只能重启应用
+            if let Some(main_win) = app.get_webview_window("main") {
+                let h = main_win.clone(); // 闭包捕获独立 handle（避免与 &self 借用冲突）
+                let _ = main_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = h.hide();
+                    }
+                });
+            }
+
             // T35：启动 Ctrl 全局钩子（按住拖动、松开穿透锁定）
             window::start_ctrl_override(app.handle().clone());
 
