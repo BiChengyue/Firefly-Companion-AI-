@@ -6,6 +6,7 @@ import CharacterCard from './CharacterCard.vue'
 import WeatherWidget from './WeatherWidget.vue'
 import SystemStatusWidget from './SystemStatusWidget.vue'
 import ServerStatusWidget from './ServerStatusWidget.vue'
+import ComputerStatusWidget from './ComputerStatusWidget.vue'
 import HealthWidget from './HealthWidget.vue'
 
 const companion = useCompanionStore()
@@ -17,6 +18,7 @@ const companion = useCompanionStore()
     <WeatherWidget v-if="companion.isDaily" />
     <SystemStatusWidget v-else />
     <ServerStatusWidget />
+    <ComputerStatusWidget />
     <HealthWidget />
   </aside>
 </template>

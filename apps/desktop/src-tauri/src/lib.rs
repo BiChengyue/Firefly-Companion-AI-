@@ -14,8 +14,7 @@ use tauri::Manager;
 /// 文件格式：`BUS_WS_TOKEN=<hex>` 或裸 token。桌宠前端经 invoke 预载到 localStorage
 /// （firefly_bus_ws_token），随后 resolveBusWsUrl() 自动带上 ?token=。
 #[tauri::command]
-fn read_bus_token() -> Option<String> {
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+fn read_bus_token() -> Option<String> {    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(appdata) = std::env::var("APPDATA") {
         candidates.push(
             std::path::Path::new(&appdata).join("firefly-desktop").join("bus-token.txt"),
@@ -32,6 +31,12 @@ fn read_bus_token() -> Option<String> {
         }
     }
     None
+}
+
+#[tauri::command]
+fn read_sensor_state() -> Option<String> {
+    // A3：桌宠本地电脑状态卡——直接读本机 sensor 采集器落盘的状态文件（不走 hub，桌面端自给）
+    std::fs::read_to_string(r"C:\ProgramData\firefly-bot\computer_sensor_state.json").ok()
 }
 
 fn read_token_file(path: &std::path::Path) -> Option<String> {
@@ -88,6 +93,7 @@ pub fn run() {
             window::move_window,
             window::start_ctrl_override,
             read_bus_token,
+            read_sensor_state,
         ])
         .setup(|app| {
             tray::setup_tray(app)?;
