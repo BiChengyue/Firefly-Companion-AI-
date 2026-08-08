@@ -394,9 +394,16 @@ function refresh() {
 }
 
 // ── 2026-08-08：快捷面板——按钮走 Rust phone_command（无线 adb 直连手机）──
-const PHONE_ACTIONS = [
+interface PhoneAction {
+  key: string
+  icon: string
+  label: string
+  hint: string
+  local?: boolean
+  disabled?: boolean
+}
+const PHONE_ACTIONS: PhoneAction[] = [
   { key: 'sound_toggle', icon: '🔔', label: '声音', hint: '响铃/静音/震动循环' },
-  { key: 'find_phone', icon: '📢', label: '找手机', hint: '音量拉满+播放铃声', disabled: true },
   { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
   { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
   { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
