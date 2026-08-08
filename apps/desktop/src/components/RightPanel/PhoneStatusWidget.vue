@@ -4,6 +4,8 @@
  *  接口未接（MOCK 渲染）；接入 hub GET /api/v1/phone-state 后填 refresh()。 */
 import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -374,159 +376,47 @@ const trackSvg = computed(() => {
   return { path, dots, w: W, h: H }
 })
 
-/** 2026-08-08：Canvas 瓦片地图——高德匿名瓦片（GCJ-02 与国内定位坐标一致），无 UI，直接标注轨迹。
- *  支持缩放（滚轮）与拖动（鼠标拖拽）——2026-08-08b */
-const mapCanvas = ref<HTMLCanvasElement | null>(null)
+// ── 2026-08-08d：Leaflet 轨迹地图（成熟库：平滑拖动/缩放/惯性/瓦片缓存）——高德瓦片 GCJ-02 与定位一致 ──
+let trackMap: L.Map | null = null
+const trackMapEl = ref<HTMLElement | null>(null)
 
-function lngLatToTile(lng: number, lat: number, z: number) {
-  const n = 2 ** z
-  const x = ((lng + 180) / 360) * n
-  const latRad = (lat * Math.PI) / 180
-  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
-  return { x, y }
-}
-function tileUrl(tx: number, ty: number, z: number): string {
-  const s = ((tx + ty) % 4 + 4) % 4
-  return `https://webrd0${s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${tx}&y=${ty}&z=${z}`
-}
-
-/** 地图视图状态：中心瓦片浮点坐标 + zoom */
-const mapView = ref({ z: 14, x: 0, y: 0 })
-let mapDrag = false
-let mapDragStart = { x: 0, y: 0, vx: 0, vy: 0 }
-let mapRenderQueued = false
-/** 2026-08-08c：瓦片内存缓存——拖动/缩放时同 URL 瓦片不重复网络加载，消除闪烁 */
-const tileCache = new Map<string, HTMLImageElement>()
-
-function getTile(url: string, cb: (img: HTMLImageElement) => void) {
-  const hit = tileCache.get(url)
-  if (hit) {
-    cb(hit)
-    return
-  }
-  const img = new Image()
-  img.onload = () => {
-    tileCache.set(url, img)
-    cb(img)
-  }
-  img.onerror = () => cb(img) // 失败也回调（空图），避免 pending 计数卡死轨迹不画
-  img.src = url
-}
-
-function initMapView() {
+function initLeafletMap() {
+  const el = trackMapEl.value
   const pts = phone.value?.track ?? []
-  if (!pts.length) return
-  const last = pts[pts.length - 1]
-  const c = lngLatToTile(last.lng, last.lat, mapView.value.z)
-  mapView.value = { z: mapView.value.z, x: c.x, y: c.y }
+  if (!el || pts.length < 1) return
+  if (trackMap) {
+    trackMap.remove()
+    trackMap = null
+  }
+  const center: [number, number] = [pts[pts.length - 1].lat, pts[pts.length - 1].lng]
+  trackMap = L.map(el, { zoomControl: false, attributionControl: false }).setView(center, 14)
+  L.tileLayer(
+    'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+    { subdomains: ['1', '2', '3', '4'], maxZoom: 19 },
+  ).addTo(trackMap)
+  const latlngs: Array<[number, number]> = pts.map((p) => [p.lat, p.lng])
+  L.polyline(latlngs, { color: '#06b6d4', weight: 3 }).addTo(trackMap)
+  L.circleMarker(latlngs[0], { color: '#22c55e', radius: 5 }).addTo(trackMap)
+  L.circleMarker(latlngs[latlngs.length - 1], { color: '#ef4444', radius: 5 }).addTo(trackMap)
+  L.control.zoom({ position: 'bottomright' }).addTo(trackMap)
+  requestAnimationFrame(() => trackMap?.invalidateSize()) // 容器渲染后修正尺寸
 }
 
-function drawTrackLayer(ctx: CanvasRenderingContext2D, z: number, cx: number, cy: number) {
-  const pts = phone.value?.track ?? []
-  const canvas = mapCanvas.value
-  if (!canvas || pts.length < 1) return
-  const TILE = 256
-  const W = canvas.width
-  const H = canvas.height
-  const toPx = (lng: number, lat: number) => {
-    const t = lngLatToTile(lng, lat, z)
-    return { x: W / 2 + (t.x - cx) * TILE, y: H / 2 + (t.y - cy) * TILE }
+function destroyLeafletMap() {
+  if (trackMap) {
+    trackMap.remove()
+    trackMap = null
   }
-  ctx.beginPath()
-  pts.forEach((p, i) => {
-    const px = toPx(p.lng, p.lat)
-    if (i === 0) ctx.moveTo(px.x, px.y)
-    else ctx.lineTo(px.x, px.y)
-  })
-  ctx.strokeStyle = '#06b6d4'
-  ctx.lineWidth = 2.5
-  ctx.stroke()
-  pts.forEach((p, i) => {
-    const px = toPx(p.lng, p.lat)
-    ctx.beginPath()
-    ctx.arc(px.x, px.y, i === 0 || i === pts.length - 1 ? 4 : 2.5, 0, Math.PI * 2)
-    ctx.fillStyle = i === 0 ? '#22c55e' : (i === pts.length - 1 ? '#ef4444' : '#ffffff')
-    ctx.fill()
-  })
 }
 
-function renderMap() {
-  const canvas = mapCanvas.value
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  const { z, x, y } = mapView.value
-  const TILE = 256
-  const W = canvas.width
-  const H = canvas.height
-  ctx.clearRect(0, 0, W, H)
-  const tx0 = Math.floor(x)
-  const ty0 = Math.floor(y)
-  const offX = (x - tx0) * TILE
-  const offY = (y - ty0) * TILE
-  const span = Math.ceil(Math.max(W, H) / TILE / 2) + 1
-  let pending = 0
-  const onLoaded = (img: HTMLImageElement, dx: number, dy: number) => {
-    ctx.drawImage(img, W / 2 - offX + dx * TILE, H / 2 - offY + dy * TILE)
-    pending--
-    if (pending === 0) drawTrackLayer(ctx, z, x, y)
-  }
-  for (let dx = -span; dx <= span; dx++) {
-    for (let dy = -span; dy <= span; dy++) {
-      pending++
-      getTile(tileUrl(tx0 + dx, ty0 + dy, z), (img) => onLoaded(img, dx, dy))
-    }
-  }
-  if (pending === 0) drawTrackLayer(ctx, z, x, y)
-}
-
-function queueRender() {
-  if (mapRenderQueued) return
-  mapRenderQueued = true
-  requestAnimationFrame(() => {
-    mapRenderQueued = false
-    renderMap()
-  })
-}
-
-function mapMouseDown(e: MouseEvent) {
-  mapDrag = true
-  mapDragStart = { x: e.clientX, y: e.clientY, vx: mapView.value.x, vy: mapView.value.y }
-}
-function mapMouseMove(e: MouseEvent) {
-  if (!mapDrag) return
-  const TILE = 256
-  const dz = 2 ** mapView.value.z
-  mapView.value = {
-    ...mapView.value,
-    x: mapDragStart.vx - ((e.clientX - mapDragStart.x) / TILE) / dz,
-    y: mapDragStart.vy - ((e.clientY - mapDragStart.y) / TILE) / dz,
-  }
-  queueRender()
-}
-function mapMouseUp() {
-  mapDrag = false
-}
-function mapWheel(e: WheelEvent) {
-  e.preventDefault()
-  const dz = e.deltaY < 0 ? 1 : -1
-  const nz = Math.min(19, Math.max(5, mapView.value.z + dz))
-  if (nz === mapView.value.z) return
-  mapView.value = { ...mapView.value, z: nz }
-  queueRender()
-}
 
 onMounted(() => {
   refresh()
   setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
 })
 watch(showTrack, (v) => {
-  if (v) {
-    window.setTimeout(() => {
-      initMapView()
-      renderMap()
-    }, 120) // 等 canvas 挂载后初始化视图并绘制
-  }
+  if (v) window.setTimeout(initLeafletMap, 120) // 等容器挂载后初始化
+  else destroyLeafletMap()
 })
 </script>
 
@@ -580,18 +470,7 @@ watch(showTrack, (v) => {
       <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
       <div v-if="showTrack" class="track-panel">
         <div class="track-head">🗺️ 今日轨迹 <span class="track-tip">滚轮缩放 · 拖动平移</span></div>
-        <canvas
-          v-if="phone?.track?.length"
-          ref="mapCanvas"
-          class="track-map"
-          width="260"
-          height="140"
-          @mousedown="mapMouseDown"
-          @mousemove="mapMouseMove"
-          @mouseup="mapMouseUp"
-          @mouseleave="mapMouseUp"
-          @wheel.prevent="mapWheel"
-        />
+        <div v-if="phone?.track?.length" ref="trackMapEl" class="track-map" />
         <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
           <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
           <circle
