@@ -3,6 +3,7 @@
  *  布局：①当前应用 ②占用条(CPU/内存/磁盘/电量) ③当日圆环+图例 ④本日活动条+三态预览窗 ⑤foot(屏幕分钟)。
  *  接口未接（MOCK 渲染）；接入 hub GET /api/v1/phone-state 后填 refresh()。 */
 import { ref, computed, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -311,6 +312,65 @@ function refresh() {
   // 2026-08-08：接口未接，留空（MOCK 数据渲染）；接入后 fetch hub /api/v1/phone-state 写 phone/lastTs
 }
 
+// ── 2026-08-08：快捷面板——按钮走 Rust phone_command（无线 adb 直连手机）──
+const PHONE_ACTIONS = [
+  { key: 'ring_mode', icon: '🔔', label: '响铃', hint: '铃声音量拉满' },
+  { key: 'silent_mode', icon: '🔕', label: '静音', hint: '铃声音量归零' },
+  { key: 'find_phone', icon: '📢', label: '找手机', hint: '音量拉满+播放铃声' },
+  { key: 'shizuku', icon: '⚡', label: 'Shizuku', hint: '激活 Shizuku' },
+  { key: 'dnd_toggle', icon: '🌙', label: '勿扰', hint: '勿扰开关' },
+  { key: 'screenshot', icon: '📸', label: '截图', hint: '截图存电脑' },
+  { key: 'pull_files', icon: '📁', label: '文件', hint: '拉取 Download 到电脑' },
+  { key: 'scrcpy', icon: '🖥️', label: '投屏', hint: 'scrcpy 无线投屏' },
+  { key: 'track', icon: '🗺️', label: '轨迹', hint: '查看今日轨迹', local: true },
+  { key: 'torch', icon: '🔦', label: '手电', hint: '需手机端 App', disabled: true },
+]
+const busyKey = ref('')
+const actionMsg = ref('')
+const showTrack = ref(false)
+
+async function runPhoneAction(a: { key: string; label: string; local?: boolean; disabled?: boolean }) {
+  if (a.disabled) return
+  if (a.local) {
+    showTrack.value = !showTrack.value
+    return
+  }
+  busyKey.value = a.key
+  actionMsg.value = ''
+  try {
+    const res = await invoke<string>('phone_command', { action: a.key })
+    actionMsg.value = `${a.label} ✓ ${res}`
+  } catch (e) {
+    actionMsg.value = `${a.label} ✗ ${e}`
+  } finally {
+    busyKey.value = ''
+  }
+}
+
+/** 轨迹迷你图（SVG 按经纬度归一化连线；数据 mock，接口接入后 phone.track 替换） */
+const trackSvg = computed(() => {
+  const pts = phone.value?.track ?? []
+  if (pts.length < 2) return { path: '', w: 0, h: 0 }
+  const lats = pts.map((p) => p.lat)
+  const lngs = pts.map((p) => p.lng)
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
+  const W = 240, H = 80, PAD = 8
+  const sx = (lng: number) => PAD + ((lng - minLng) / (maxLng - minLng || 1)) * (W - PAD * 2)
+  const sy = (lat: number) => H - PAD - ((lat - minLat) / (maxLat - minLat || 1)) * (H - PAD * 2)
+  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.lng).toFixed(1)},${sy(p.lat).toFixed(1)}`).join(' ')
+  const dots = pts.map((p, i) => ({ x: sx(p.lng).toFixed(1), y: sy(p.lat).toFixed(1), first: i === 0, last: i === pts.length - 1 }))
+  return { path, dots, w: W, h: H }
+})
+
+/** 打开地图链接（高德 URI，用最后一个轨迹点；无轨迹则空） */
+const trackMapUrl = computed(() => {
+  const pts = phone.value?.track ?? []
+  const last = pts[pts.length - 1]
+  if (!last) return 'https://uri.amap.com/marker'
+  return `https://uri.amap.com/marker?position=${last.lng},${last.lat}&name=手机当前位置`
+})
+
 onMounted(() => {
   refresh()
   setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
@@ -346,6 +406,37 @@ onMounted(() => {
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
           <span class="bar-val">{{ b.pct }}%</span>
         </div>
+      </div>
+
+      <!-- ②b 快捷面板（2026-08-08：Rust phone_command 无线 adb 直连手机） -->
+      <div class="quick-panel">
+        <div
+          v-for="a in PHONE_ACTIONS"
+          :key="a.key"
+          class="qbtn"
+          :class="{ disabled: a.disabled, busy: busyKey === a.key }"
+          :title="a.hint"
+          @click="runPhoneAction(a)"
+        >
+          <span class="qicon">{{ busyKey === a.key ? '⏳' : a.icon }}</span>
+          <span class="qlabel">{{ a.label }}</span>
+        </div>
+      </div>
+      <div v-if="actionMsg" class="qmsg">{{ actionMsg }}</div>
+
+      <!-- ②c 轨迹地图（点开「轨迹」显示今日轨迹） -->
+      <div v-if="showTrack" class="track-panel">
+        <div class="track-head">🗺️ 今日轨迹 <a class="track-map-link" :href="trackMapUrl" target="_blank">打开地图 ↗</a></div>
+        <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
+          <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
+          <circle
+            v-for="(d, i) in trackSvg.dots"
+            :key="i"
+            :cx="d.x" :cy="d.y" r="3"
+            :fill="d.first ? '#22c55e' : (d.last ? '#ef4444' : '#fff')"
+          />
+        </svg>
+        <div v-else class="track-hint">暂无轨迹数据</div>
       </div>
 
       <!-- ③ 圆环 + 图例 -->
@@ -464,6 +555,70 @@ onMounted(() => {
 .bar { flex: 1; height: 6px; background: var(--border-subtle); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
 .bar-val { width: 34px; text-align: right; font-size: 11px; font-family: 'Courier New', monospace; }
+
+/* 2026-08-08：快捷面板 */
+.quick-panel {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.qbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 2px;
+  cursor: pointer;
+  user-select: none;
+}
+.qbtn:hover { background: var(--bg-surface, rgba(255, 255, 255, 0.07)); }
+.qbtn.disabled { opacity: 0.4; cursor: not-allowed; }
+.qbtn.busy { opacity: 0.6; }
+.qicon { font-size: 14px; line-height: 1; }
+.qlabel { font-size: 9px; color: var(--text-secondary); }
+.qmsg {
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 轨迹面板 */
+.track-panel {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.2));
+  border-radius: 6px;
+}
+.track-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.track-map-link {
+  color: var(--accent, #06b6d4);
+  text-decoration: none;
+  font-size: 10px;
+}
+.track-svg {
+  width: 100%;
+  height: 80px;
+  display: block;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+.track-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
 
 .ring-block { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; }
 .ring {

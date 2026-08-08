@@ -65,8 +65,7 @@ fn read_ui_pref(key: String) -> String {
 }
 
 #[tauri::command]
-fn write_ui_pref(key: String, value: String) {
-    let p = ui_prefs_path();
+fn write_ui_pref(key: String, value: String) {    let p = ui_prefs_path();
     let mut lines: Vec<String> = Vec::new();
     if let Ok(s) = std::fs::read_to_string(&p) {
         lines = s.lines().map(|l| l.to_string()).collect();
@@ -106,6 +105,104 @@ fn read_token_file(path: &std::path::Path) -> Option<String> {
         None
     } else {
         Some(t.to_string())
+    }
+}
+
+/// 2026-08-08：手机快捷面板——通过无线 adb（Tailnet）对手机执行白名单动作。
+/// 每次执行前先 connect（adb 幂等，无线连接 daemon 重启后会丢，connect 可恢复）。
+const PHONE_ADB: &str = r"C:\Android\platform-tools\adb.exe";
+const PHONE_DEV: &str = "100.108.223.31:5555";
+
+fn run_cmd(args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new(args[0])
+        .args(&args[1..])
+        .output()
+        .map_err(|e| format!("启动失败: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[tauri::command]
+fn phone_command(action: String) -> Result<String, String> {
+    // 先确保 adb 无线连接
+    let _ = run_cmd(&[PHONE_ADB, "connect", PHONE_DEV]);
+    let shell = |args: &[&str]| -> Result<String, String> {
+        let mut full = vec![PHONE_ADB, "-s", PHONE_DEV, "shell"];
+        full.extend_from_slice(args);
+        run_cmd(&full)
+    };
+    match action.as_str() {
+        // 响铃模式：铃声音量拉满（不真响）
+        "ring_mode" => {
+            shell(&["settings", "put", "system", "volume_music", "15"])?;
+            shell(&["settings", "put", "system", "volume_ring", "15"])
+        }
+        // 静音模式：铃声音量归零
+        "silent_mode" => {
+            shell(&["settings", "put", "system", "volume_music", "0"])?;
+            shell(&["settings", "put", "system", "volume_ring", "0"])
+        }
+        // 找手机：音量拉满 + 播放预置铃声（findphone.mp3 需已 push 到 /sdcard/Download/）
+        "find_phone" => {
+            shell(&["settings", "put", "system", "volume_music", "15"])?;
+            shell(&["settings", "put", "system", "volume_ring", "15"])?;
+            shell(&[
+                "am", "start", "-a", "android.intent.action.VIEW",
+                "-d", "file:///sdcard/Download/findphone.mp3", "-t", "audio/mp3",
+            ])
+        }
+        // 激活 Shizuku
+        "shizuku" => shell(&[
+            "sh", "/storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh",
+        ]),
+        // 勿扰开关（读当前 zen_mode 反写）
+        "dnd_toggle" => {
+            let cur = shell(&["settings", "get", "secure", "zen_mode"])?;
+            let next = if cur.trim() == "1" { "0" } else { "1" };
+            shell(&["settings", "put", "secure", "zen_mode", next])?;
+            Ok(if next == "1" { "dnd_on" } else { "dnd_off" }.into())
+        }
+        // 截图：screencap 存到 C:\ProgramData\firefly-bot\screenshots\
+        "screenshot" => {
+            let dir = r"C:\ProgramData\firefly-bot\screenshots";
+            let _ = std::fs::create_dir_all(dir);
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let out_path = format!(r"{dir}\phone_{ts}.png");
+            let child = std::process::Command::new(PHONE_ADB)
+                .args(["-s", PHONE_DEV, "exec-out", "screencap", "-p"])
+                .stdout(std::fs::File::create(&out_path).map_err(|e| e.to_string())?)
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map_err(|e| format!("截图失败: {e}"))?;
+            if !child.success() {
+                return Err("截图失败".into());
+            }
+            Ok(format!("saved:{out_path}"))
+        }
+        // 访问文件：pull /sdcard/Download 到电脑并打开资源管理器
+        "pull_files" => {
+            let dest = r"C:\ProgramData\firefly-bot\phone_files\Download";
+            let _ = std::fs::create_dir_all(dest);
+            run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "pull", "/sdcard/Download", dest])?;
+            let _ = std::process::Command::new("explorer").arg(dest).spawn();
+            Ok(format!("opened:{dest}"))
+        }
+        // 一键投屏：scrcpy（需主电脑已安装 scrcpy）
+        "scrcpy" => {
+            let _ = std::process::Command::new("scrcpy")
+                .args(["-s", PHONE_DEV])
+                .spawn()
+                .map_err(|e| format!("scrcpy 启动失败（未安装？）: {e}"))?;
+            Ok("scrcpy started".into())
+        }
+        // 手电筒：华为无系统 torch 命令，需手机端 App/Shizuku 实现
+        "torch" => Err("华为无系统手电筒命令，需手机端 App 实现".into()),
+        _ => Err(format!("unknown action: {action}")),
     }
 }
 
@@ -205,6 +302,7 @@ pub fn run() {
             read_sensor_state,
             read_ui_pref,
             write_ui_pref,
+            phone_command,
         ])
         .setup(|app| {
             tray::setup_tray(app)?;
