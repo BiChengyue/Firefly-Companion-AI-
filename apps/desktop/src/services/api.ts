@@ -127,6 +127,45 @@ export async function getFitnessHistory(days = 7, signal?: AbortSignal): Promise
   return requestBus<FitnessHistory>(`/api/v1/fitness/history?days=${days}`, signal)
 }
 
+// ── 2026-08-08：手机状态 + 轨迹（bus /api/v1/phone-state(+track)，转发 hub）──
+export interface PhoneStateHub {
+  at?: number
+  loc_bucket?: string
+  screen?: string
+  battery?: number
+  received_at?: number
+  raw?: {
+    charging?: boolean
+    network?: { kind?: string; ssid?: string }
+    dnd?: boolean
+    focus_app?: { pkg?: string; name?: string }
+    screen_today_min?: number
+    storage_pct?: number
+    ram_pct?: number
+    bt_headset?: boolean
+    lat?: number
+    lng?: number
+    loc?: string
+  }
+}
+
+export interface PhoneTrackPoint {
+  at: number
+  lat: number
+  lng: number
+  battery?: number
+}
+
+/** 拉取手机最新状态（bus /api/v1/phone-state，只读）。失败抛错（调用方降级显示）。 */
+export async function getPhoneState(signal?: AbortSignal): Promise<PhoneStateHub> {
+  return requestBus<PhoneStateHub>('/api/v1/phone-state', signal)
+}
+
+/** 拉取手机轨迹（bus /api/v1/phone-track?hours=N&limit=M，只读，时间正序）。 */
+export async function getPhoneTrack(hours = 24, limit = 200, signal?: AbortSignal): Promise<{ track: PhoneTrackPoint[] }> {
+  return requestBus<{ track: PhoneTrackPoint[] }>(`/api/v1/phone-track?hours=${hours}&limit=${limit}`, signal)
+}
+
 /**
  * 头像等后端静态图片的完整 URL。
  * dev（Vite）下 base 为空 → 返回相对路径，由 Vite public 静态服务提供；

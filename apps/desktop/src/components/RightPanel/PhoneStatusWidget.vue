@@ -8,6 +8,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { getPhoneState, getPhoneTrack } from '@/services/api'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
 interface SensorState {
@@ -313,7 +314,43 @@ function fmtSeg(s: Seg) {
 }
 
 function refresh() {
-  // 2026-08-08：接口未接，留空（MOCK 数据渲染）；接入后 fetch hub /api/v1/phone-state 写 phone/lastTs
+  // 2026-08-08：接 hub（经 bus /api/v1/phone-state + phone-track）真实数据；失败显示错误
+  loading.value = true
+  Promise.all([
+    getPhoneState(),
+    getPhoneTrack(24, 200).catch(() => null),
+  ])
+    .then(([st, tr]) => {
+      const r = st.raw ?? {}
+      phone.value = {
+        last_at: st.at ?? Date.now() / 1000,
+        battery: st.battery,
+        charging: { active: !!r.charging, method: 'wireless' },
+        cpu_pct: undefined,
+        ram_pct: r.ram_pct,
+        storage_pct: r.storage_pct,
+        dnd: !!r.dnd,
+        network: {
+          kind: (r.network?.kind === 'cellular' ? 'mobile' : r.network?.kind ?? 'offline') as 'wifi' | 'mobile' | 'offline',
+          ssid: r.network?.ssid,
+        },
+        loc_bucket: undefined,
+        track: (tr?.track ?? []).map((p) => ({ t: p.at, lat: p.lat, lng: p.lng })),
+        focus_app: r.focus_app?.name ? { name: r.focus_app.name, cat: 'unknown' } : null,
+        screen_today_min: r.screen_today_min,
+        // 活动段/分类暂无接口（App 后续上报），保留 MOCK 渲染
+        today_activities: phone.value?.today_activities ?? phoneMockActivities(),
+        today_categories: phone.value?.today_categories,
+      }
+      lastTs.value = Date.now()
+      error.value = ''
+    })
+    .catch((e) => {
+      error.value = `手机数据暂不可用: ${e}`
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 // ── 2026-08-08：快捷面板——按钮走 Rust phone_command（无线 adb 直连手机）──
@@ -465,7 +502,10 @@ function destroyLeafletMap() {
 
 onMounted(() => {
   refresh()
-  setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
+  setInterval(() => {
+    refresh()
+    checkIdleAuto()
+  }, 30000) // 30s：手机状态刷新 + 5 分钟闲置检查
   // 2026-08-08：Tauri 拖放（OS 文件拖入 → 路径列表；Tauri 2 接管 HTML5 drop）
   getCurrentWebview().onDragDropEvent((ev) => {
     if (ev.payload.type === 'drop' && ev.payload.paths.length) {

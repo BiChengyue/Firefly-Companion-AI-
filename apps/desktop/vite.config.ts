@@ -27,6 +27,9 @@ export default defineConfig({
       '/api/v1/monitor': 'http://100.111.201.71:8766',
       // T-31-A2：fitness（最新 + 历史）走 bus（8766）
       '/api/v1/fitness': 'http://100.111.201.71:8766',
+      // 2026-08-08：手机状态 + 轨迹（bus 转发 hub）
+      '/api/v1/phone-state': 'http://100.111.201.71:8766',
+      '/api/v1/phone-track': 'http://100.111.201.71:8766',
       '/api': 'http://100.111.201.71:8765',
       '/photo': 'http://100.111.201.71:8765', // T34：背景图/头像 dev 走 proxy（photoUrl 相对路径）
       '/health': 'http://100.111.201.71:8765',

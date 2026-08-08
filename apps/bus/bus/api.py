@@ -89,6 +89,15 @@ class BusHttpHandler(BaseHTTPRequestHandler):
             if not days.isdigit() or not (1 <= int(days) <= 90):
                 days = "7"
             self._proxy_hub("/api/v1/fitness/history", f"days={days}")
+        elif parsed.path == "/api/v1/phone-state":
+            # 手机最新状态（2026-08-08，转发 hub phone-state，桌宠手机卡）
+            self._proxy_hub("/api/v1/phone-state")
+        elif parsed.path == "/api/v1/phone-track":
+            # 手机轨迹（2026-08-08，转发 hub phone-track，桌宠轨迹地图）
+            q = parse_qs(parsed.query)
+            hours = q.get("hours", ["24"])[0]
+            limit = q.get("limit", ["200"])[0]
+            self._proxy_hub("/api/v1/phone-track", f"hours={hours}&limit={limit}")
         else:
             self._json(404, {"error": {"code": "NOT_FOUND", "message": "unknown endpoint"}})
 
