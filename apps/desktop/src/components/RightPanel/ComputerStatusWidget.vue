@@ -318,6 +318,8 @@ onMounted(() => {
             <button v-if="winWindow.mode !== 'auto'" class="zoom-back" title="回到最近 1 小时" @click="winMode = 'auto'; winCenter = null; hoverSeg = null">⟲</button>
           </div>
           <div class="zoom-bar">
+            <!-- 底段：窗口内无记录的空隙显示浅灰（不是纯黑） -->
+            <div class="zseg gap" style="width: 100%; background: #26262a" />
             <div
               v-for="(s, i) in winWindow.segs"
               :key="i"
