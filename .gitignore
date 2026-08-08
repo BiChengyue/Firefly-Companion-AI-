@@ -45,6 +45,11 @@ data/audio_cache/
 resources/voice/gpt_sovits_engine/logs/
 resources/voice/gpt_sovits_engine/*.log
 
+# 本机测试 bus（18766）运行时生成的 SQLite 文件——不入库
+apps/data/bus.db
+apps/data/bus.db-shm
+apps/data/bus.db-wal
+
 # Python 虚拟环境（运行时创建，不纳入版本库）
 resources/voice/gpt_sovits_engine/env/
 
