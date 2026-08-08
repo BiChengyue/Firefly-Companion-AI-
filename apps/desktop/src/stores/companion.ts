@@ -34,11 +34,26 @@ export const useCompanionStore = defineStore('companion', () => {
   const workspaces = ref<{ id: string; name: string; path: string; isDefault?: boolean; pathExists?: boolean }[]>([])
   const activeWorkspaceId = ref<string | null>(localStorage.getItem('firefly_active_ws') || null)
 
-  // T34：深色模式开关（localStorage `firefly_dark_mode` 持久化；work 模式强制萨姆暗红不受其影响）
+  // T34：深色模式开关。持久化双写：localStorage（`firefly_dark_mode`，兼容）+ Rust 文件
+  // （%APPDATA%\firefly-desktop\ui-prefs.txt 的 darkMode——WebView2 localStorage 重启偶发丢失，2026-08-08）
   // 命名 themeMode 而非 theme——theme 已被「模式配置对象」占用（applyModeConfig）
   const themeMode = ref<'light' | 'dark'>(
     localStorage.getItem('firefly_dark_mode') === 'dark' ? 'dark' : 'light',
   )
+
+  /** 启动时从 Rust 文件读偏好覆盖（优先级高于 localStorage，Rust 文件持久化可靠） */
+  async function loadUiPrefs() {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const v = await invoke<string>('read_ui_pref', { key: 'darkMode' })
+      if (v === 'dark' || v === 'light') {
+        themeMode.value = v
+        try { localStorage.setItem('firefly_dark_mode', v) } catch { /* 忽略 */ }
+      }
+    } catch {
+      // 非 Tauri 环境（纯浏览器 dev 预览）→ 保持 localStorage 值
+    }
+  }
 
   function toggleThemeMode() {
     themeMode.value = themeMode.value === 'dark' ? 'light' : 'dark'
@@ -46,6 +61,14 @@ export const useCompanionStore = defineStore('companion', () => {
       localStorage.setItem('firefly_dark_mode', themeMode.value)
     } catch {
       // localStorage 不可用（隐私模式）→ 仅本次会话生效
+    }
+    // 双写 Rust 文件（重启可靠恢复）
+    try {
+      import('@tauri-apps/api/core').then(({ invoke }) =>
+        invoke('write_ui_pref', { key: 'darkMode', value: themeMode.value }),
+      )
+    } catch {
+      // 非 Tauri 环境忽略
     }
   }
 
@@ -133,6 +156,8 @@ export const useCompanionStore = defineStore('companion', () => {
   // ── 初始化（异步，由 App.vue 在 onMounted 中调用）───────
   async function initialize() {
     _initializing = true
+    // 0. 从 Rust 文件读 UI 偏好（深色模式等，持久化可靠）
+    void loadUiPrefs()
     // 1. 立即从 localStorage 加载会话列表（瞬间显示，不阻塞）
     sessions.value = loadSessionsFromLS()
     sessionsLoaded.value = true

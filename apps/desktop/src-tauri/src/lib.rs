@@ -39,6 +39,57 @@ fn read_sensor_state() -> Option<String> {
     std::fs::read_to_string(r"C:\ProgramData\firefly-bot\computer_sensor_state.json").ok()
 }
 
+/// UI 偏好持久化文件（key=value 每行，避免引 JSON 依赖）——深色模式等不依赖 WebView2 localStorage（重启丢）
+fn ui_prefs_path() -> std::path::PathBuf {
+    let mut p = std::env::var("APPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    p.push("firefly-desktop");
+    p.push("ui-prefs.txt");
+    p
+}
+
+#[tauri::command]
+fn read_ui_pref(key: String) -> String {
+    let p = ui_prefs_path();
+    if let Ok(s) = std::fs::read_to_string(&p) {
+        for line in s.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == key {
+                    return v.trim().to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+#[tauri::command]
+fn write_ui_pref(key: String, value: String) {
+    let p = ui_prefs_path();
+    let mut lines: Vec<String> = Vec::new();
+    if let Ok(s) = std::fs::read_to_string(&p) {
+        lines = s.lines().map(|l| l.to_string()).collect();
+    }
+    let kv = format!("{key}={value}");
+    let mut found = false;
+    for l in lines.iter_mut() {
+        if let Some((k, _)) = l.split_once('=') {
+            if k.trim() == key {
+                *l = kv.clone();
+                found = true;
+            }
+        }
+    }
+    if !found {
+        lines.push(kv);
+    }
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&p, lines.join("\n"));
+}
+
 fn read_token_file(path: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
@@ -152,6 +203,8 @@ pub fn run() {
             window::start_ctrl_override,
             read_bus_token,
             read_sensor_state,
+            read_ui_pref,
+            write_ui_pref,
         ])
         .setup(|app| {
             tray::setup_tray(app)?;
