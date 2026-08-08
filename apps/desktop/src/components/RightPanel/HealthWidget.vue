@@ -142,8 +142,8 @@ function onSvgMove(e: MouseEvent) {
         </div>
         <div class="cell">
           <span class="c-label">😴 睡眠</span>
-          <!-- 2026-08-08：取消评分分行——合并为 时长|评分 单行（如 7h23m|87） -->
-          <span class="c-big">{{ sleepText ?? '—' }}<span :style="sleepScore != null ? { color: scoreColor } : {}">|{{ sleepScore ?? '--' }}</span></span>
+          <!-- 2026-08-08：取消评分分行——合并为 时长|评分 单行（分隔符弱色，不跟两边同色） -->
+          <span class="c-big">{{ sleepText ?? '—' }}<span class="sleep-sep">|</span><span :style="sleepScore != null ? { color: scoreColor } : {}">{{ sleepScore ?? '--' }}</span></span>
         </div>
         <div class="cell trend-cell">
           <span class="c-label">📈 近 7 天步数</span>
@@ -264,6 +264,12 @@ function onSvgMove(e: MouseEvent) {
   color: var(--text-primary);
   font-family: 'Courier New', monospace;
   white-space: nowrap;
+}
+/* 2026-08-08：睡眠 时长|评分 的分隔符——弱色，不与两侧同色 */
+.sleep-sep {
+  color: var(--text-tertiary);
+  font-weight: 400;
+  margin: 0 1px;
 }
 .c-val {
   font-size: 12px;
