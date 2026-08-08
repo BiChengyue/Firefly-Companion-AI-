@@ -304,10 +304,21 @@ onMounted(() => {
             :key="i"
             class="tseg"
             :class="s.type"
-            :style="{ width: timeline.widths[i] + '%', background: CAT_COLORS[s.type] ?? '#888' }"
+            :style="{
+              left: (s.start / timeline.total) * 100 + '%',
+              width: timeline.widths[i] + '%',
+              background: CAT_COLORS[s.type] ?? '#888',
+            }"
           />
           <!-- 未来时段（now → 24:00）黑色 -->
-          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
+          <div
+            v-if="timeline.now < timeline.end"
+            class="tseg future"
+            :style="{
+              left: (timeline.now / timeline.total) * 100 + '%',
+              width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%',
+            }"
+          />
         </div>
         <div class="tlabel"><span>0:00</span><span>24:00</span></div>
 
@@ -404,7 +415,7 @@ onMounted(() => {
   border: 1.5px solid #fff; background: rgba(255, 255, 255, 0.15); border-radius: 3px;
   pointer-events: none; box-sizing: border-box;
 }
-.tseg { height: 100%; }
+.tseg { position: absolute; top: 0; height: 100%; }
 .tseg.empty { opacity: 0.3; }
 .tseg.future { background: #000 !important; }
 .tlabel { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-tertiary); margin-top: 2px; font-family: 'Courier New', monospace; }
