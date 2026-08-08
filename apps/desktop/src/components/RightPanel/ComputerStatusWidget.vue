@@ -305,7 +305,7 @@ onMounted(() => {
             class="tseg"
             :class="s.type"
             :style="{
-              left: (s.start / timeline.total) * 100 + '%',
+              left: ((s.start - timeline.start) / timeline.total) * 100 + '%',
               width: timeline.widths[i] + '%',
               background: CAT_COLORS[s.type] ?? '#888',
             }"
@@ -315,7 +315,7 @@ onMounted(() => {
             v-if="timeline.now < timeline.end"
             class="tseg future"
             :style="{
-              left: (timeline.now / timeline.total) * 100 + '%',
+              left: ((timeline.now - timeline.start) / timeline.total) * 100 + '%',
               width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%',
             }"
           />
