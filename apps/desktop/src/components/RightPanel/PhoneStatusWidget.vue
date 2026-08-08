@@ -56,16 +56,18 @@ const sitting = computed(() => {
   const s = state.value?.sitting_minutes
   return typeof s === 'number' && s >= 1 ? Math.round(s) : 0
 })
-// 占用条数据（对齐服务器 bars）
+// 占用条（手机卡）：CPU / 内存 / 磁盘 / 电量——显卡换成电量（2026-08-08）
 const resourceBars = computed(() => {
   const u = state.value?.system_usage
-  if (!u) return []
-  return [
-    { label: 'CPU', pct: u.cpu ?? 0 },
-    { label: '内存', pct: u.mem ?? 0 },
-    { label: '磁盘 C', pct: u.disk?.C ?? 0 },
-    ...(typeof u.gpu === 'number' ? [{ label: '显卡', pct: u.gpu }] : []),
-  ]
+  const bars: Array<{ label: string; pct: number; sub?: string }> = []
+  if (u) {
+    bars.push({ label: 'CPU', pct: u.cpu ?? 0 })
+    bars.push({ label: '内存', pct: u.mem ?? 0 })
+    bars.push({ label: '磁盘', pct: u.disk?.C ?? 0 })
+  }
+  // 电量：接口接入后换 phone.battery / phone.charging；当前为 mock 占位
+  bars.push({ label: '电量', pct: 87, sub: '⚡无线' })
+  return bars
 })
 // 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
 const procRows = computed(() => {
@@ -295,7 +297,7 @@ onMounted(() => {
         <div v-for="b in resourceBars" :key="b.label" class="bar-row">
           <span class="bar-label">{{ b.label }}</span>
           <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, b.pct) + '%' }" /></div>
-          <span class="bar-val">{{ b.pct }}%</span>
+          <span class="bar-val">{{ b.pct }}%{{ b.sub ? ' ' + b.sub : '' }}</span>
         </div>
       </div>
 
