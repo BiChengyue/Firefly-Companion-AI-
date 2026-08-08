@@ -2,7 +2,7 @@
 /** 手机状态卡（2026-08-08：基于电脑卡布局，数据源全部改为手机 phone mock）。
  *  布局：①当前应用 ②占用条(CPU/内存/磁盘/电量) ③当日圆环+图例 ④本日活动条+三态预览窗 ⑤foot(屏幕分钟)。
  *  接口未接（MOCK 渲染）；接入 hub GET /api/v1/phone-state 后填 refresh()。 */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 interface Seg { start: number; end: number; type: string; label?: string; detail?: Record<string, number> }
@@ -374,17 +374,89 @@ const trackSvg = computed(() => {
   return { path, dots, w: W, h: H }
 })
 
-/** 打开地图链接（百度地图，用最后一个轨迹点；无轨迹则首页）——2026-08-08 改百度 */
-const trackMapUrl = computed(() => {
+/** 2026-08-08：Canvas 瓦片地图——高德匿名瓦片（GCJ-02 与国内定位坐标一致），无 UI，直接标注轨迹 */
+const mapCanvas = ref<HTMLCanvasElement | null>(null)
+const mapZoom = 14
+
+function lngLatToTile(lng: number, lat: number, z: number) {
+  const n = 2 ** z
+  const x = ((lng + 180) / 360) * n
+  const latRad = (lat * Math.PI) / 180
+  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
+  return { x, y }
+}
+
+function drawTrackMap() {
+  const canvas = mapCanvas.value
   const pts = phone.value?.track ?? []
+  if (!canvas || pts.length < 1) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const TILE = 256
+  const W = canvas.width
+  const H = canvas.height
+  const Z = mapZoom
   const last = pts[pts.length - 1]
-  if (!last) return 'https://map.baidu.com'
-  return `https://api.map.baidu.com/marker?location=${last.lat},${last.lng}&title=手机当前位置&output=html&src=firefly`
-})
+  const c = lngLatToTile(last.lng, last.lat, Z)
+  const tx0 = Math.floor(c.x)
+  const ty0 = Math.floor(c.y)
+  // 中心点在画布的位置（把中心瓦片放到画布中心）
+  const cxPx = W / 2
+  const cyPx = H / 2
+  const offX = (c.x - tx0) * TILE
+  const offY = (c.y - ty0) * TILE
+  const drawTile = (dx: number, dy: number) => {
+    const img = new Image()
+    const tx = tx0 + dx
+    const ty = ty0 + dy
+    img.onload = () => {
+      ctx.drawImage(img, cxPx - offX + dx * TILE, cyPx - offY + dy * TILE)
+    }
+    img.src = `https://webrd0${((tx + ty) % 4 + 4) % 4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${tx}&y=${ty}&z=${Z}`
+  }
+  // 铺 3x3 瓦片覆盖画布
+  const span = Math.ceil(W / TILE / 2) + 1
+  for (let dx = -span; dx <= span; dx++) {
+    for (let dy = -span; dy <= span; dy++) {
+      drawTile(dx, dy)
+    }
+  }
+  // 等瓦片加载后画轨迹（onload 触发绘制；这里用 setTimeout 兜底，瓦片加载完由 onload 画）
+  // 轨迹线：GCJ-02 → 画布像素
+  const toPx = (lng: number, lat: number) => {
+    const t = lngLatToTile(lng, lat, Z)
+    return {
+      x: cxPx + (t.x - c.x) * TILE,
+      y: cyPx + (t.y - c.y) * TILE,
+    }
+  }
+  window.setTimeout(() => {
+    ctx.beginPath()
+    pts.forEach((p, i) => {
+      const px = toPx(p.lng, p.lat)
+      if (i === 0) ctx.moveTo(px.x, px.y)
+      else ctx.lineTo(px.x, px.y)
+    })
+    ctx.strokeStyle = '#06b6d4'
+    ctx.lineWidth = 2.5
+    ctx.stroke()
+    // 轨迹点
+    pts.forEach((p, i) => {
+      const px = toPx(p.lng, p.lat)
+      ctx.beginPath()
+      ctx.arc(px.x, px.y, i === 0 || i === pts.length - 1 ? 4 : 2.5, 0, Math.PI * 2)
+      ctx.fillStyle = i === 0 ? '#22c55e' : (i === pts.length - 1 ? '#ef4444' : '#ffffff')
+      ctx.fill()
+    })
+  }, 400)
+}
 
 onMounted(() => {
   refresh()
   setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
+})
+watch(showTrack, (v) => {
+  if (v) window.setTimeout(() => drawTrackMap(), 120) // 等 canvas 挂载后绘制瓦片地图
 })
 </script>
 
@@ -438,12 +510,12 @@ onMounted(() => {
       <!-- ②c 轨迹地图（点开「轨迹」直接内嵌地图显示当前位置 + 下方轨迹走向） -->
       <div v-if="showTrack" class="track-panel">
         <div class="track-head">🗺️ 今日轨迹</div>
-        <iframe
+        <canvas
           v-if="phone?.track?.length"
-          :src="trackMapUrl"
+          ref="mapCanvas"
           class="track-map"
-          loading="lazy"
-          title="百度地图当前位置"
+          width="260"
+          height="140"
         />
         <svg v-if="trackSvg.path" :viewBox="`0 0 ${trackSvg.w} ${trackSvg.h}`" class="track-svg">
           <path :d="trackSvg.path" fill="none" stroke="var(--accent, #06b6d4)" stroke-width="1.5" />
