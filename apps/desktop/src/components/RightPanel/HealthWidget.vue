@@ -142,8 +142,8 @@ function onSvgMove(e: MouseEvent) {
         </div>
         <div class="cell">
           <span class="c-label">😴 睡眠</span>
-          <span class="c-big">{{ sleepText ?? '—' }}</span>
-          <span v-if="sleepScore != null" class="c-sub" :style="{ color: scoreColor }">{{ sleepScore }}</span>
+          <!-- 2026-08-08：取消评分分行——合并为 时长|评分 单行（如 7h23m|87） -->
+          <span class="c-big">{{ sleepText ?? '—' }}<span :style="sleepScore != null ? { color: scoreColor } : {}">|{{ sleepScore ?? '--' }}</span></span>
         </div>
         <div class="cell trend-cell">
           <span class="c-label">📈 近 7 天步数</span>
@@ -254,7 +254,7 @@ function onSvgMove(e: MouseEvent) {
   text-align: center;
 }
 .c-label {
-  font-size: 9px;
+  font-size: 10px;      /* 2026-08-08：步数/心率/睡眠/趋势标题稍拉大（原 9px） */
   color: var(--text-muted);
   white-space: nowrap;
 }
