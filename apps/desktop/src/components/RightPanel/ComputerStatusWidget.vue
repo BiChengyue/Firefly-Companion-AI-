@@ -1,6 +1,9 @@
 <script setup lang="ts">
 /** 电脑本地状态卡（A3）— 直接读本机 sensor 采集器落盘的 computer_sensor_state.json（不走 hub）。
- *  60s 自动刷新 + 手动刷新按钮；读不到（sensor 未运行/未装）显示「本地监测未运行」。 */
+ *  60s 自动刷新 + 手动刷新按钮；读不到（sensor 未运行/未装）显示「本地监测未运行」。
+ *
+ *  传感器健康不在此展示（统一放服务器状态卡）；手机端状态待接入（预留：future `phone-state`
+ *  数据源，接口结构与这里一致，卡片内留空位即可）。 */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -58,12 +61,6 @@ const lastAtAgo = computed(() => {
   if (min < 60) return `${min} 分钟前`
   return `${Math.round(min / 60)} 小时前`
 })
-const sensorOk = computed(() => {
-  const s = state.value
-  if (!s) return false
-  if (s.error) return false
-  return (s.fail_streak ?? 0) === 0
-})
 
 async function refresh() {
   const myVersion = ++refreshVersion
@@ -120,12 +117,7 @@ onUnmounted(() => {
           <span class="k">数据</span>
           <span class="v">{{ lastAtAgo }}</span>
         </li>
-        <li>
-          <span class="k">传感器</span>
-          <span class="v" :class="sensorOk ? 'ok' : 'bad'">
-            {{ sensorOk ? '正常' : state.error || `异常(${state.fail_streak})` }}
-          </span>
-        </li>
+        <!-- 手机端状态：预留接口位（future phone-state） -->
       </ul>
 
       <div class="foot">更新于 {{ lastTs ? new Date(lastTs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—' }}</div>
@@ -137,10 +129,10 @@ onUnmounted(() => {
 
 <style scoped>
 .computer-card {
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -151,26 +143,29 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 .title {
-  font-weight: 700;
   font-size: 12px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 .refresh-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 14px;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
   cursor: pointer;
-  padding: 0 2px;
+  font-size: 12px;
   line-height: 1;
+  padding: 2px 6px;
 }
 .refresh-btn:hover {
   color: var(--accent-strong);
+  border-color: var(--border-accent);
 }
+.refresh-btn:disabled { opacity: 0.5; cursor: default; }
 .unavailable {
   font-size: 11px;
-  color: var(--text-tertiary);
-  padding: 4px 0;
+  color: var(--text-muted);
+  padding: 6px 0;
 }
 .main-row {
   display: flex;
