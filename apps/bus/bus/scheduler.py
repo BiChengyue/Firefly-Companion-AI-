@@ -212,6 +212,7 @@ class Scheduler:
         OutputBus(self.store).emit(OutboundMessage(
             id=message_id, target=first_target, content=reply, critical=critical,
             mode=gen_mode, voice=voice, voices=voices,
+            refId=inbound.get("refId"),  # T-30：主动消息（日报 report-* 等）refId 透传——QQ 豁免长文截断
         ))
         acks = self.dispatcher.dispatch(message_id, reachability=self.tracker.current())
         _log.info(

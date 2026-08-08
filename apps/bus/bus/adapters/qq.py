@@ -142,6 +142,12 @@ class QqAdapter:
         # 档位长度兜底截断（生成侧尺度优先，adapter 只做保险）
         # T-27 A：截断尊重换行边界——超长时优先在最近换行处截断，避免切在句中丢语义。
         max_len = TIER_MAX_LEN[self.tier]
+        # T-30 日报长文：refId=report-*（主动日报）→ 走 QQ 单条上限（官方 4000），
+        # 不按对话档位 80 截断——否则六板块日报被截到第一板块。普通对话仍按档位限尺度。
+        if message.refId and message.refId.startswith("report-"):
+            max_len = 4000
+        # T-30 排查日志：确认日报豁免是否生效（发后删除或降 debug）
+        _log.info("qq deliver refId=%s content_len=%d max_len=%d", message.refId, len(message.content), max_len)
         content = message.content
         if len(content) > max_len:
             cut = content[:max_len]
