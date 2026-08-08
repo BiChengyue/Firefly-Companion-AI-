@@ -42,7 +42,7 @@ const CAT_LABELS: Record<string, string> = {
   multi: '多任务', offline: '离线', star_rail: '星铁',
 }
 const CAT_COLORS: Record<string, string> = {
-  coding: '#3b82f6', browsing: '#0ea5e9', communication: '#a855f7', game: '#f97316',
+  coding: '#3b82f6', browsing: '#eab308', communication: '#a855f7', game: '#f97316',
   video: '#ef4444', document: '#06b6d4', design: '#ec4899', writing: '#84cc16',
   meeting: '#8b5cf6', tool: '#94a3b8', unknown: '#64748b', rest: '#22c55e',
   multi: '#eab308', offline: '#9ca3af', star_rail: '#f97316',
