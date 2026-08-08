@@ -22,7 +22,8 @@
         "decorations": true,
         "alwaysOnTop": false,
         "resizable": true,
-        "skipTaskbar": false
+        "skipTaskbar": false,
+        "dragDropEnabled": true
       },
       {
         "label": "pet",

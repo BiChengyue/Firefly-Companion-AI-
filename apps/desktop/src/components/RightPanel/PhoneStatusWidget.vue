@@ -4,6 +4,7 @@
  *  接口未接（MOCK 渲染）；接入 hub GET /api/v1/phone-state 后填 refresh()。 */
 import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
@@ -412,23 +413,17 @@ async function fsDownload(name: string, dir: boolean) {
     fsMsg.value = `✗ ${e}`
   }
 }
-async function fsDrop(e: DragEvent) {
-  e.preventDefault()
-  const files = e.dataTransfer?.files
-  if (!files?.length) return
-  for (const f of Array.from(files)) {
-    const buf = await f.arrayBuffer()
-    const u8 = new Uint8Array(buf)
-    const chunks: string[] = []
-    for (let i = 0; i < u8.length; i += 8192) {
-      chunks.push(String.fromCharCode(...u8.subarray(i, i + 8192)))
-    }
-    const b64 = btoa(chunks.join(''))
+/** 2026-08-08：Tauri 拖放（OS 文件 → 路径）——Tauri 2 接管了 HTML5 drop，必须用 onDragDropEvent */
+async function fsPushPaths(paths: string[]) {
+  fsMsg.value = ''
+  for (const p of paths) {
+    const name = p.split(/[\\/]/).pop() || 'file'
     try {
-      await invoke('phone_fs_push', { base64Data: b64, remote: fsPath.value + '/' + f.name })
-      fsMsg.value = `⤒ ${f.name} 已上传`
+      const res = await invoke<string>('phone_fs_push_path', { local: p, remote: fsPath.value + '/' + name })
+      fsMsg.value = `⤒ ${name} 已上传`
+      console.log('push ok', res)
     } catch (err) {
-      fsMsg.value = `✗ ${f.name} ${err}`
+      fsMsg.value = `✗ ${name} ${err}`
     }
   }
   fsList(fsPath.value)
@@ -471,6 +466,12 @@ function destroyLeafletMap() {
 onMounted(() => {
   refresh()
   setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
+  // 2026-08-08：Tauri 拖放（OS 文件拖入 → 路径列表；Tauri 2 接管 HTML5 drop）
+  getCurrentWebview().onDragDropEvent((ev) => {
+    if (ev.payload.type === 'drop' && ev.payload.paths.length) {
+      fsPushPaths(ev.payload.paths)
+    }
+  })
 })
 watch(showTrack, (v) => {
   if (v) window.setTimeout(initLeafletMap, 120) // 等容器挂载后初始化
@@ -526,7 +527,7 @@ watch(showTrack, (v) => {
       <div v-if="actionMsg" class="qmsg">{{ actionMsg }}</div>
 
       <!-- ②b2 文件浏览器（桌宠内嵌，adb 驱动：列表/下载/拖放上传） -->
-      <div v-if="showFiles" class="fs-panel" @dragover.prevent @drop="fsDrop">
+      <div v-if="showFiles" class="fs-panel">
         <div class="fs-head">
           <button class="fs-btn" title="上级" @click="fsUp">⬆</button>
           <span class="fs-path">{{ fsPath }}</span>

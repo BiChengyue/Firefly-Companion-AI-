@@ -309,6 +309,21 @@ fn phone_fs_push(base64_data: String, remote: String) -> Result<String, String> 
     Ok("pushed".into())
 }
 
+/// 2026-08-08：拖放上传——Tauri onDragDropEvent 拿到本地路径，直接 push（无需 base64）
+#[tauri::command]
+fn phone_fs_push_path(local: String, remote: String) -> Result<String, String> {
+    if !std::path::Path::new(&local).exists() {
+        return Err(format!("本地文件不存在: {local}"));
+    }
+    // 确保目标目录存在（remote 形如 /sdcard/Download/xxx.png）
+    if let Some(idx) = remote.rfind('/') {
+        let dir = &remote[..idx];
+        let _ = phone_adb_shell(&["mkdir", "-p", dir]);
+    }
+    run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "push", &local, &remote])?;
+    Ok(format!("pushed:{remote}"))
+}
+
 // ── T35：桌宠位置持久化 ────────────────────────────────
 // 拖动桌宠后自动记住位置，下次启动恢复（tauri.conf 的 x/y 只作首次兜底）。
 fn pet_pos_path() -> std::path::PathBuf {
@@ -409,6 +424,7 @@ pub fn run() {
             phone_fs_list,
             phone_fs_pull,
             phone_fs_push,
+            phone_fs_push_path,
         ])
         .setup(|app| {
             tray::setup_tray(app)?;
