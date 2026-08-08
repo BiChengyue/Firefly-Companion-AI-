@@ -80,6 +80,12 @@ const procRows = computed(() => {
   return rows
 })
 // 当日圆环数据
+// 圆环中心：>1 小时显示「X.X 时」，否则「X 分」
+const ringTotal = computed(() => {
+  const total = ringItems.value.total
+  if (total >= 3600) return { v: (total / 3600).toFixed(1), unit: '时' }
+  return { v: Math.round(total / 60), unit: '分' }
+})
 const ringItems = computed(() => {
   const c = state.value?.today_categories ?? {}
   const items = Object.entries(c).filter(([, v]) => v >= 60)
@@ -177,7 +183,7 @@ onMounted(() => {
       <!-- ③ 圆环 + 图例 -->
       <div class="ring-block">
         <div class="ring" :style="{ background: ringItems.total ? `conic-gradient(${ringItems.items.map((it, idx) => `${CAT_COLORS[it.k] ?? '#888'} ${idx === 0 ? 0 : ringItems.items.slice(0, idx).reduce((a, x) => a + x.pct, 0) * 100}% ${ringItems.items.slice(0, idx + 1).reduce((a, x) => a + x.pct, 0) * 100}%`).join(',')})` : '#333' }">
-          <div class="ring-hole">{{ ringItems.total ? Math.round(ringItems.total / 60) : 0 }}<small>分</small></div>
+          <div class="ring-hole">{{ ringTotal.v }}<small>{{ ringTotal.unit }}</small></div>
         </div>
         <ul class="legend">
           <li v-for="it in ringItems.items" :key="it.k">
@@ -259,7 +265,7 @@ onMounted(() => {
 }
 .ring-hole {
   width: 48px; height: 48px; border-radius: 50%; background: var(--bg-elevated);
-  display: flex; align-items: baseline; justify-content: center; font-size: 15px; font-weight: 700; color: var(--text-primary);
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: var(--text-primary);
 }
 .ring-hole small { font-size: 9px; color: var(--text-tertiary); margin-left: 2px; font-weight: 400; }
 .legend { list-style: none; margin: 0; padding: 0; flex: 1; }
