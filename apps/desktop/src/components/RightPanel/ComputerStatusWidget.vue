@@ -101,7 +101,8 @@ const ringItems = computed(() => {
 })
 // 活动条（0:00 → 24:00 全长，未来时段黑色）
 const timeline = computed(() => {
-  const acts = (state.value?.today_activities ?? []).filter((s) => s.end > s.start) // 过滤零宽段（D）
+  // 过滤零宽段 + 离线段（offline 当无记录显示，不占数据段）
+  const acts = (state.value?.today_activities ?? []).filter((s) => s.end > s.start && s.type !== 'offline')
   const t0 = new Date(); t0.setHours(0, 0, 0, 0)
   const start = t0.getTime() / 1000
   const end = start + 86400
@@ -318,8 +319,8 @@ onMounted(() => {
             <button v-if="winWindow.mode !== 'auto'" class="zoom-back" title="回到最近 1 小时" @click="winMode = 'auto'; winCenter = null; hoverSeg = null">⟲</button>
           </div>
           <div class="zoom-bar">
-            <!-- 底段：窗口内无记录的空隙显示浅灰（不是纯黑） -->
-            <div class="zseg gap" style="width: 100%; background: #26262a" />
+            <!-- 底段：窗口内无记录的空隙显示灰（offline 也归入空隙） -->
+            <div class="zseg gap" style="width: 100%; background: #3a3a3a" @mouseenter="hoverSeg = null" />
             <div
               v-for="(s, i) in winWindow.segs"
               :key="i"
