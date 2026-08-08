@@ -35,8 +35,8 @@
         "resizable": false,
         "shadow": false,
         "skipTaskbar": true,
-        "x": -2,
-        "y": 817
+        "x": 2,
+        "y": 789
       }
     ],
     "security": {

@@ -53,6 +53,33 @@ fn read_token_file(path: &std::path::Path) -> Option<String> {
     }
 }
 
+// ── T35：桌宠位置持久化 ────────────────────────────────
+// 拖动桌宠后自动记住位置，下次启动恢复（tauri.conf 的 x/y 只作首次兜底）。
+fn pet_pos_path() -> std::path::PathBuf {
+    let mut p = std::env::var("APPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    p.push("firefly-desktop");
+    p.push("pet-pos.txt");
+    p
+}
+
+fn load_pet_pos() -> Option<(i32, i32)> {
+    let content = std::fs::read_to_string(pet_pos_path()).ok()?;
+    let mut parts = content.split_whitespace();
+    let x: i32 = parts.next()?.parse().ok()?;
+    let y: i32 = parts.next()?.parse().ok()?;
+    Some((x, y))
+}
+
+fn save_pet_pos(x: i32, y: i32) {
+    let path = pet_pos_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, format!("{x} {y}"));
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -68,6 +95,17 @@ pub fn run() {
             // 确保桌宠窗口始终置顶（Tauri 2 配置项不总是生效，运行时强制设置）
             if let Some(pet_win) = app.get_webview_window("pet") {
                 let _ = pet_win.set_always_on_top(true);
+
+                // T35：恢复上次保存的桌宠位置（拖动持久化）
+                if let Some((x, y)) = load_pet_pos() {
+                    let _ = pet_win.set_position(tauri::PhysicalPosition { x, y });
+                }
+                // 移动时自动保存位置（下一次启动恢复）
+                let _ = pet_win.on_window_event(|event| {
+                    if let tauri::WindowEvent::Moved(pos) = event {
+                        save_pet_pos(pos.x, pos.y);
+                    }
+                });
             }
 
             // T35：启动 Ctrl 全局钩子（按住拖动、松开穿透锁定）
