@@ -135,6 +135,7 @@ fn phone_command(action: String) -> Result<String, String> {
     };
     match action.as_str() {
         // 声音三态循环：响铃 → 静音 → 震动 → 响铃（2026-08-08 合并为一键）
+        // 华为 settings put 不同步 AudioService，实际音量用按键注入调（VOLUME_DOWN=25 / VOLUME_UP=24）
         "sound_toggle" => {
             let ring = shell(&["settings", "get", "system", "volume_ring"])?;
             let vib = shell(&["settings", "get", "system", "vibrate_when_ringing"]).unwrap_or_default();
@@ -142,14 +143,16 @@ fn phone_command(action: String) -> Result<String, String> {
             let vib_on = vib.trim() == "1";
             if ring_vol > 0 {
                 // 当前响铃 → 静音
-                shell(&["settings", "put", "system", "volume_ring", "0"])?;
-                shell(&["settings", "put", "system", "volume_music", "0"])?;
+                let _ = shell(&["settings", "put", "system", "volume_ring", "0"]);
+                let _ = shell(&["settings", "put", "system", "volume_music", "0"]);
+                let _ = shell(&["sh", "-c", "for i in $(seq 1 15); do input keyevent 25; done"]);
                 Ok("silent".into())
             } else if vib_on {
                 // 当前震动 → 响铃
-                shell(&["settings", "put", "system", "vibrate_when_ringing", "0"])?;
-                shell(&["settings", "put", "system", "volume_ring", "15"])?;
-                shell(&["settings", "put", "system", "volume_music", "15"])?;
+                let _ = shell(&["settings", "put", "system", "vibrate_when_ringing", "0"]);
+                let _ = shell(&["settings", "put", "system", "volume_ring", "15"]);
+                let _ = shell(&["settings", "put", "system", "volume_music", "15"]);
+                let _ = shell(&["sh", "-c", "for i in $(seq 1 15); do input keyevent 24; done"]);
                 Ok("ring".into())
             } else {
                 // 当前静音 → 震动
@@ -157,10 +160,10 @@ fn phone_command(action: String) -> Result<String, String> {
                 Ok("vibrate".into())
             }
         }
-        // 找手机：音量拉满 + 华为音乐单次播放组件播铃声（VIEW 会被文件管理器/航旅纵横抢，必须指定组件）
+        // 找手机：媒体音量拉满（settings put 在华为不同步 AudioService，必须按键注入调 STREAM_MUSIC）+ 播放铃声
         "find_phone" => {
-            shell(&["settings", "put", "system", "volume_music", "15"])?;
-            shell(&["settings", "put", "system", "volume_ring", "15"])?;
+            let _ = shell(&["settings", "put", "system", "volume_music", "15"]);
+            let _ = shell(&["sh", "-c", "for i in $(seq 1 15); do input keyevent 24; done"]);
             // 确保铃声在手机（不存在则从电脑 push，再不行报错提示）
             if shell(&["ls", "/sdcard/Download/findphone.mp3"]).is_err() {
                 let local_ring = r"C:\ProgramData\firefly-bot\findphone.mp3";
