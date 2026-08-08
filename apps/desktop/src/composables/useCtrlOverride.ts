@@ -20,8 +20,8 @@ export function useCtrlOverride() {
   }
 
   onMounted(() => {
-    // 默认保持可交互，让桌宠被固定位置时能随时接收点击互动
-    setPassthrough(false)
+    // T35：默认开启点击穿透，桌宠不挡鼠标；需要拖动/互动时用 TopBar 的「穿透/交互」按钮切回
+    setPassthrough(true)
   })
 
   return {}

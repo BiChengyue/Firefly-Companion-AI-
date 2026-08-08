@@ -3,6 +3,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useCompanionStore } from '@/stores/companion'
 import { emit } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import ModeSwitch from '@/components/Common/ModeSwitch.vue'
 
 const companion = useCompanionStore()
@@ -24,6 +25,15 @@ function togglePetLock() {
   const next = !companion.petLocked
   companion.setPetLocked(next)
   emit('pet-lock-changed', { locked: next })
+}
+
+// ── 桌宠点击穿透（T35）─────────────────────────────────
+async function togglePassthrough() {
+  const next = !companion.passthrough
+  try {
+    await invoke('set_cursor_passthrough', { passthrough: next })
+    companion.setPassthrough(next)
+  } catch {}
 }
 </script>
 
@@ -62,6 +72,15 @@ function togglePetLock() {
       >
         <span class="lock-icon">{{ companion.petLocked ? '🔓' : '🔒' }}</span>
         <span class="lock-label">{{ companion.petLocked ? '移动桌宠' : '锁定桌宠' }}</span>
+      </button>
+      <button
+        class="pet-pt-btn"
+        :class="{ passthrough: companion.passthrough }"
+        :title="companion.passthrough ? '点击穿透已开：桌宠不挡鼠标；点击关闭可拖动/互动' : '点击穿透已关：桌宠可交互；点击开启穿透'"
+        @click="togglePassthrough"
+      >
+        <span class="pt-icon">{{ companion.passthrough ? '👆' : '🖱️' }}</span>
+        <span class="pt-label">{{ companion.passthrough ? '穿透' : '交互' }}</span>
       </button>
       <span class="signal">◉◉◉</span>
     </div>
@@ -140,6 +159,34 @@ function togglePetLock() {
 }
 
 .pet-lock-btn.unlocked {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* T35：点击穿透切换按钮（复用锁按钮样式，穿透态高亮） */
+.pet-pt-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 14px;
+  transition: all var(--transition-fast);
+  color: var(--text-secondary);
+}
+
+.pet-pt-btn:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.pet-pt-btn.passthrough {
   background: var(--accent-light);
   border-color: var(--accent);
   color: var(--accent-strong);
