@@ -69,20 +69,19 @@ const resourceBars = computed(() => {
 })
 // 前台进程列表（screens + 焦点标记 + 检测器行；多屏按主屏幕/副屏幕/副屏幕 N 命名）
 const procRows = computed(() => {
-  const rows: Array<{ name: string; proc: string | null; cat: string; focus: boolean }> = []
+  const rows: Array<{ name: string; cat: string; focus: boolean }> = []
   let subIdx = 0
   for (const s of state.value?.screens ?? []) {
     const label = s.primary ? '主屏幕' : (subIdx === 0 ? '副屏幕' : `副屏幕 ${subIdx + 1}`)
     rows.push({
-      name: s.proc ? `${label} · ${s.proc}` : label,
-      proc: s.proc ?? null,
+      name: label,
       cat: s.category,
       focus: s.monitor === state.value?.focus_monitor,
     })
     if (!s.primary) subIdx++
   }
   if (!rows.length && state.value?.category) {
-    rows.push({ name: '主屏幕', proc: null, cat: state.value.category ?? 'unknown', focus: true })
+    rows.push({ name: '主屏幕', cat: state.value.category ?? 'unknown', focus: true })
   }
   // 主屏幕排最上面（primary 优先），其余按原顺序
   rows.sort((a, b) => (a.name.startsWith('主屏幕') ? -1 : 0) - (b.name.startsWith('主屏幕') ? -1 : 0))
