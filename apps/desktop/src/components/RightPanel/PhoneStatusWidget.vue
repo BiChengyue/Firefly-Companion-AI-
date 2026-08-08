@@ -528,7 +528,38 @@ async function fsPushPaths(paths: string[]) {
   fsList(fsPath.value)
 }
 
-// ── 2026-08-08d：Leaflet 轨迹地图（成熟库：平滑拖动/缩放/惯性/瓦片缓存）——高德瓦片 GCJ-02 与定位一致 ──
+// ── 2026-08-08d：Leaflet 轨迹地图（成熟库：平滑拖动/缩放/惯性/瓦片缓存）——高德瓦片 GCJ-02 ──
+// 2026-08-08e：手机 GPS（Android 原生 Location）返回 WGS-84，高德瓦片是 GCJ-02（火星坐标）——
+// 直接画会偏移几百米，需先做 WGS-84 → GCJ-02 转换。
+function wgs84ToGcj02(lat: number, lng: number): [number, number] {
+  const a = 6378245.0
+  const ee = 0.00669342162296594323
+  if (lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271) return [lat, lng] // 境外不转
+  const tl = (x: number, y: number) => {
+    let r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
+    r += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0
+    r += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0
+    r += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320.0 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0
+    return r
+  }
+  const tg = (x: number, y: number) => {
+    let r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
+    r += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0
+    r += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0
+    r += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0
+    return r
+  }
+  let dLat = tl(lng - 105.0, lat - 35.0)
+  let dLng = tg(lng - 105.0, lat - 35.0)
+  const radLat = (lat / 180.0) * Math.PI
+  let magic = Math.sin(radLat)
+  magic = 1 - ee * magic * magic
+  const sqrtMagic = Math.sqrt(magic)
+  dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI)
+  dLng = (dLng * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI)
+  return [lat + dLat, lng + dLng]
+}
+
 let trackMap: L.Map | null = null
 const trackMapEl = ref<HTMLElement | null>(null)
 
@@ -540,13 +571,15 @@ function initLeafletMap() {
     trackMap.remove()
     trackMap = null
   }
-  const center: [number, number] = [pts[pts.length - 1].lat, pts[pts.length - 1].lng]
+  // WGS-84 → GCJ-02：地图（高德）与轨迹点统一到火星坐标
+  const toGcj = (lat: number, lng: number): [number, number] => wgs84ToGcj02(lat, lng)
+  const center: [number, number] = toGcj(pts[pts.length - 1].lat, pts[pts.length - 1].lng)
   trackMap = L.map(el, { zoomControl: false, attributionControl: false }).setView(center, 14)
   L.tileLayer(
     'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
     { subdomains: ['1', '2', '3', '4'], maxZoom: 19 },
   ).addTo(trackMap)
-  const latlngs: Array<[number, number]> = pts.map((p) => [p.lat, p.lng])
+  const latlngs: Array<[number, number]> = pts.map((p) => toGcj(p.lat, p.lng))
   L.polyline(latlngs, { color: '#06b6d4', weight: 3 }).addTo(trackMap)
   L.circleMarker(latlngs[0], { color: '#22c55e', radius: 5 }).addTo(trackMap)
   L.circleMarker(latlngs[latlngs.length - 1], { color: '#ef4444', radius: 5 }).addTo(trackMap)
