@@ -157,13 +157,22 @@ fn phone_command(action: String) -> Result<String, String> {
                 Ok("vibrate".into())
             }
         }
-        // 找手机：音量拉满 + 播放预置铃声（findphone.mp3 需已 push 到 /sdcard/Download/）
+        // 找手机：音量拉满 + 华为音乐单次播放组件播铃声（VIEW 会被文件管理器/航旅纵横抢，必须指定组件）
         "find_phone" => {
             shell(&["settings", "put", "system", "volume_music", "15"])?;
             shell(&["settings", "put", "system", "volume_ring", "15"])?;
+            // 确保铃声在手机（不存在则从电脑 push，再不行报错提示）
+            if shell(&["ls", "/sdcard/Download/findphone.mp3"]).is_err() {
+                let local_ring = r"C:\ProgramData\firefly-bot\findphone.mp3";
+                if !std::path::Path::new(local_ring).exists() {
+                    return Err("铃声文件缺失：请把 findphone.mp3 放到 C:\\ProgramData\\firefly-bot\\".into());
+                }
+                run_cmd(&[PHONE_ADB, "-s", PHONE_DEV, "push", local_ring, "/sdcard/Download/findphone.mp3"])?;
+            }
             shell(&[
                 "am", "start", "-a", "android.intent.action.VIEW",
                 "-d", "file:///sdcard/Download/findphone.mp3", "-t", "audio/mp3",
+                "-n", "com.huawei.music.local/com.huawei.music.ui.player.oneshot.MediaPlaybackActivityStarter",
             ])
         }
         // 激活 Shizuku
