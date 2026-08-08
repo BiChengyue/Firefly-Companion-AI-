@@ -256,24 +256,22 @@ onMounted(() => {
 <template>
   <div class="computer-card">
     <div class="head">
-      <span class="title">🖥️ 电脑状态</span>
+      <div class="head-left">
+        <span class="dot" :class="stale ? 'down' : 'up'" title="检测器在线状态" />
+        <span class="title">🖥️ 电脑状态</span>
+      </div>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 
     <div v-if="error" class="unavailable">{{ error }}</div>
 
     <template v-else-if="state">
-      <!-- ① 前台进程 + 检测器 -->
+      <!-- ① 前台进程（检测器在线状态已移到标题栏红绿点） -->
       <ul class="procs">
         <li v-for="(r, i) in procRows" :key="i">
           <span class="dot" :class="r.focus ? 'focus' : 'blur'" />
           <span class="pname">{{ r.name }}</span>
           <span class="pcat">{{ CAT_LABELS[r.cat] ?? r.cat }}</span>
-        </li>
-        <li>
-          <span class="dot" :class="stale || state.detector_ok === false ? 'down' : 'up'" />
-          <span class="pname">检测器</span>
-          <span class="pcat">{{ stale ? '失效' : (state.detector_ok === false ? '异常' : '正常') }}</span>
         </li>
       </ul>
 
@@ -374,6 +372,7 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.head-left { display: flex; align-items: center; gap: 6px; }
 .title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .refresh-btn {
   background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);

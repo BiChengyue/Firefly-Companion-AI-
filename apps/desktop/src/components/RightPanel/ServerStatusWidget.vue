@@ -60,7 +60,10 @@ const resourceBars = computed(() => {
 <template>
   <div class="server-card">
     <div class="head">
-      <span class="title">🌐 服务器状态</span>
+      <div class="head-left">
+        <span class="dot" :class="error ? 'down' : 'up'" title="与主电脑连接状态" />
+        <span class="title">🌐 服务器状态</span>
+      </div>
       <button class="refresh-btn" :disabled="loading" title="刷新" @click="refresh">⟳</button>
     </div>
 
@@ -126,6 +129,11 @@ const resourceBars = computed(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+}
+.head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .title {
   font-size: 12px;

@@ -10,7 +10,10 @@
 <template>
   <div class="phone-card">
     <div class="head">
-      <span class="title">📱 手机状态</span>
+      <div class="head-left">
+        <span class="dot down" title="手机端未接入" />
+        <span class="title">📱 手机状态</span>
+      </div>
     </div>
     <div class="unavailable">手机端待接入</div>
     <!-- future: <ul class="details"> 电量 / 充电 / 勿扰 / 位置 </ul> -->
@@ -33,6 +36,19 @@
   justify-content: space-between;
   margin-bottom: 8px;
 }
+.head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot.up { background: #22c55e; }
+.dot.down { background: #ef4444; }
 .title {
   font-size: 12px;
   font-weight: 700;
