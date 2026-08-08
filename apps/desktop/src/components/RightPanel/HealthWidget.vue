@@ -109,10 +109,39 @@ const trendPts = computed(() => {
   const min = Math.min(...nums)
   const range = max - min || 1
   return days.map((d, i) => {
-    const x = days.length === 1 ? SVG_W / 2 : (i / (days.length - 1)) * SVG_W
+    // 2026-08-08：首末点内缩（PAD_X），不贴边框
+    const x = days.length === 1 ? SVG_W / 2 : PAD_X + (i / (days.length - 1)) * (SVG_W - PAD_X * 2)
     const y = SVG_H - 4 - ((Number(d.steps) - min) / range) * (SVG_H - 8)
     return { x, y, date: d.date.slice(5), steps: Number(d.steps) }
   })
+})
+
+/** 2026-08-08：趋势图首末点水平内缩量（避免贴边） */
+const PAD_X = 6
+
+/** 2026-08-08：步数分级色（与健康卡 stepsColor 同机制）——趋势点/折线过渡用 */
+function gradeColor(steps: number): string {
+  if (Number(steps) >= 8000) return '#22c55e'
+  if (Number(steps) >= 5000) return '#eab308'
+  return '#ef4444'
+}
+
+/** 2026-08-08：折线分段（相邻点每段一个线性渐变，从起点色过渡到终点色） */
+const segColors = computed(() => {
+  const pts = trendPts.value
+  const segs: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; c1: string; c2: string }> = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    segs.push({
+      id: `tg-${i}`,
+      x1: pts[i].x,
+      y1: pts[i].y,
+      x2: pts[i + 1].x,
+      y2: pts[i + 1].y,
+      c1: gradeColor(pts[i].steps),
+      c2: gradeColor(pts[i + 1].steps),
+    })
+  }
+  return segs
 })
 
 const polyPoints = computed(() =>
@@ -194,10 +223,10 @@ function onSvgMove(e: MouseEvent) {
               @mouseleave="hoverIdx = -1"
             >
               <defs>
-                <!-- 2026-08-08：趋势彩色化——折线渐变 + 面积渐变 -->
-                <linearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stop-color="var(--accent)" />
-                  <stop offset="100%" stop-color="#22d3ee" />
+                <!-- 2026-08-08：趋势彩色化——每段折线独立渐变（起点色→终点色过渡），面积渐变 -->
+                <linearGradient v-for="sg in segColors" :key="sg.id" :id="sg.id" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" :stop-color="sg.c1" />
+                  <stop offset="100%" :stop-color="sg.c2" />
                 </linearGradient>
                 <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28" />
@@ -205,12 +234,15 @@ function onSvgMove(e: MouseEvent) {
                 </linearGradient>
               </defs>
               <path :d="areaPath" fill="url(#trendArea)" />
-              <polyline
-                :points="polyPoints"
-                fill="none"
-                stroke="url(#trendLine)"
+              <line
+                v-for="sg in segColors"
+                :key="sg.id"
+                :x1="sg.x1"
+                :y1="sg.y1"
+                :x2="sg.x2"
+                :y2="sg.y2"
+                :stroke="`url(#${sg.id})`"
                 stroke-width="1.6"
-                stroke-linejoin="round"
                 stroke-linecap="round"
               />
               <circle
@@ -219,7 +251,7 @@ function onSvgMove(e: MouseEvent) {
                 :cx="p.x"
                 :cy="p.y"
                 :r="i === trendPts.length - 1 ? 3 : 1.8"
-                :fill="i === trendPts.length - 1 ? '#22d3ee' : 'var(--accent)'"
+                :fill="gradeColor(p.steps)"
                 :stroke="i === trendPts.length - 1 ? '#fff' : 'none'"
                 stroke-width="1"
               />
