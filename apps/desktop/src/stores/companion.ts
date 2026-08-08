@@ -124,10 +124,16 @@ export const useCompanionStore = defineStore('companion', () => {
   function loadSessionsFromLS(): Session[] {
     try {
       const raw = localStorage.getItem('firefly_sessions')
-      return raw ? JSON.parse(raw) : []
+      const list = raw ? JSON.parse(raw) : []
+      return desktopOnlySessions(list)
     } catch {
       return []
     }
+  }
+
+  /** 只保留电脑端会话（desktop- 前缀；qq-/hub-events 等其它端消息不在电脑端显示，2026-08-08） */
+  function desktopOnlySessions<T extends { id: string }>(list: T[]): T[] {
+    return list.filter((s) => s.id.startsWith('desktop-'))
   }
 
   function loadActiveSessionIdFromLS(): string | null {
@@ -193,7 +199,7 @@ export const useCompanionStore = defineStore('companion', () => {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const list = await api.getSessions()
-        sessions.value = list.map((si) => ({
+        sessions.value = desktopOnlySessions(list).map((si) => ({
           id: si.id,
           title: si.title,
           messages: [],

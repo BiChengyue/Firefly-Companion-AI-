@@ -44,6 +44,10 @@ export function useWsHandler(callbacks: WsHandlerCallbacks) {
   })
 
   function handleWsMessage(msg: WsServerMessage) {
+    // 2026-08-08：消息去处标注——带 target 且不含 desktop 的消息不在电脑端处理（bus 已按路由过滤，前端双保险）
+    if ('target' in msg && typeof msg.target === 'string' && msg.target !== 'desktop') {
+      return
+    }
     switch (msg.type) {
       // ── 服务端 ACK：已收到消息，立即展示思考指示 + 启动生成超时计时（T-15）──
       case 'ack_received':

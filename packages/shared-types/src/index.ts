@@ -124,13 +124,13 @@ export type WsServerMessage =
   | { type: 'concern'; content: string } // 主动关怀推送（阶段3）
   | { type: 'reminder_created'; reminder: { id: string; text: string; dueTimestamp: number; fromApi?: boolean } }
   | { type: 'memory_updated'; count: number } // 后台记忆抽取完成通知（阶段8）
-  | { type: 'voice_audio'; audioUrl?: string; audioBase64?: string; text?: string } // 语音推播消息（阶段7）
+  | { type: 'voice_audio'; audioUrl?: string; audioBase64?: string; text?: string; target?: 'desktop' | 'mobile_inapp' } // 语音推播消息（阶段7；target 标注去处，2026-08-08）
   | { type: 'token_usage'; usage: TokenUsage; messageId: string } // 单条消息 Token 消耗明细（阶段9）
   | { type: 'daily_unlocked'; unlocked: boolean } // 日常模式解除限制状态变更（阶段9）
   | { type: 'transition_line'; line: string; to_mode: AppMode } // 模式切换过场台词（阶段10）
   | { type: 'planning_thought'; delta: string } // Agent 规划阶段流式思考（阶段20）
   | { type: 'compact_step'; step_ids: string[] } // 上下文压缩通知，前端折叠被压缩的步骤（阶段23）
-  | { type: 'proactive_speech'; content: string; source?: string; motion?: string; expression?: string } // 主动聊天推送（阶段25：双引擎）
+  | { type: 'proactive_speech'; content: string; source?: string; motion?: string; expression?: string; target?: 'desktop' | 'mobile_inapp' | 'qq' } // 主动聊天推送（阶段25：双引擎；target 标注去处，2026-08-08）
   | { type: 'ack_received' } // 服务端确认收到消息（0ms 乐观响应，前端立即解除 Loading）
   // ── 总线协议（PROTOCOL.md，bus ↔ 桌宠）──
   | { type: 'ack'; messageId: string } // 用户消息已入 inbox 确认
