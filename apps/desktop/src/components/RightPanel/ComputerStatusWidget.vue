@@ -25,10 +25,15 @@ const state = ref<SensorState | null>(null)
 const error = ref('')
 const lastTs = ref(0)
 const loading = ref(false)
-const hoverSeg = ref<Seg | null>(null)
-const hoverTime = ref<number | null>(null) // hover 对应当天秒数（A：时间定位）
+const hoverSeg = ref<Seg | null>(null)      // 副条 hover 命中的段
 const barEl = ref<HTMLElement | null>(null)
 let refreshVersion = 0
+
+// 预览窗三态：auto（最近1h，常显）/ follow（跟随主条鼠标）/ lock（点击锁定）
+const winMode = ref<'auto' | 'follow' | 'lock'>('auto')
+const winCenter = ref<number | null>(null)  // follow/lock 的窗口中心（当天秒）
+let lastInteract = Date.now()
+const AUTO_IDLE_MS = 5 * 60 * 1000           // 5 分钟未与主条交互 → 回 auto
 
 const CAT_LABELS: Record<string, string> = {
   coding: '写代码', browsing: '浏览网页', communication: '通讯聊天', game: '游戏',
@@ -105,30 +110,88 @@ const timeline = computed(() => {
   const widths = acts.map((s) => ((s.end - s.start) / 86400) * 100)
   return { acts, start, end, total: 86400, now, widths }
 })
-// A：hover 时间定位——x 坐标 → 当天秒数 → 命中段
+// A：主条交互——mousemove 跟随（follow）/ click 锁定 / mouseleave 未锁回 auto
 function onBarMove(e: MouseEvent) {
+  if (winMode.value === 'lock') return // 锁定态不跟随
+  lastInteract = Date.now()
   const el = barEl.value
   if (!el) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
   const sec = ratio * 86400
-  hoverTime.value = sec
-  const t = timeline.value.start + sec
-  hoverSeg.value = (timeline.value.acts.find((s) => t >= s.start && t < s.end)) ?? null
+  winMode.value = 'follow'
+  winCenter.value = sec
+  hoverSeg.value = findSegAt(sec)
 }
-// A：hover 放大窗口（±30 分钟）内的段，供浮层渲染
-const hoverWindow = computed(() => {
-  if (hoverTime.value === null) return null
-  const sec = hoverTime.value
-  const winStart = Math.max(0, sec - 1800)
-  const winEnd = Math.min(86400, sec + 1800)
-  let segs = timeline.value.acts
-    .filter((s) => (s.start - timeline.value.start) < winEnd && (s.end - timeline.value.start) > winStart)
+function onBarClick(e: MouseEvent) {
+  lastInteract = Date.now()
+  if (winMode.value === 'lock') {
+    winMode.value = 'auto' // 再点解锁回 auto
+    winCenter.value = null
+  } else {
+    const el = barEl.value
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+      winMode.value = 'lock'
+      winCenter.value = ratio * 86400
+      hoverSeg.value = findSegAt(winCenter.value)
+    }
+  }
+}
+function onBarLeave() {
+  if (winMode.value !== 'lock') {
+    winMode.value = 'auto'
+    winCenter.value = null
+  }
+  hoverSeg.value = null
+}
+function findSegAt(sec: number): Seg | null {
+  const t = timeline.value.start + sec
+  return timeline.value.acts.find((s) => t >= s.start && t < s.end) ?? null
+}
+
+// 预览窗（三态）：auto = [now-1h, now]；follow/lock = center±30min
+const winWindow = computed(() => {
+  const t = timeline.value
+  const nowSec = t.now - t.start
+  let winStart: number, winEnd: number
+  if (winMode.value === 'auto' || winCenter.value === null) {
+    winStart = Math.max(0, nowSec - 3600)
+    winEnd = nowSec
+  } else {
+    winStart = Math.max(0, winCenter.value - 1800)
+    winEnd = Math.min(86400, winCenter.value + 1800)
+  }
+  const segs = t.acts
+    .filter((s) => (s.start - t.start) < winEnd && (s.end - t.start) > winStart)
     .map((s) => {
-      const w = ((Math.min(s.end, timeline.value.start + winEnd) - Math.max(s.start, timeline.value.start + winStart)) / (winEnd - winStart)) * 100
+      const w = ((Math.min(s.end, t.start + winEnd) - Math.max(s.start, t.start + winStart)) / (winEnd - winStart)) * 100
       return { ...s, w }
     })
-  return { winStart, winEnd, segs }
+  return { winStart, winEnd, segs, mode: winMode.value }
+})
+
+// 5 分钟闲置 → 回 auto（30s tick 检查）
+function checkIdleAuto() {
+  if (Date.now() - lastInteract > AUTO_IDLE_MS && winMode.value !== 'auto') {
+    winMode.value = 'auto'
+    winCenter.value = null
+    hoverSeg.value = null
+  }
+}
+
+// 预览窗未 hover 时的汇总文本（窗口内各类型时长 top3）
+const winSummary = computed(() => {
+  const segs = winWindow.value.segs
+  if (!segs.length) return '（该时段无记录）'
+  const dur: Record<string, number> = {}
+  for (const s of segs) dur[s.type] = (dur[s.type] ?? 0) + (s.end - s.start)
+  const parts = Object.entries(dur)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k, v]) => `${CAT_LABELS[k] ?? k} ${Math.round(v / 60)} 分`)
+  return parts.join(' · ')
 })
 
 function fmtMin(sec: number) {
@@ -172,6 +235,7 @@ useSyncRefresh(refresh, 30000) // 30s 同步刷新线（setup 顶层订阅，onU
 
 onMounted(() => {
   refresh()
+  setInterval(checkIdleAuto, 30000) // 5 分钟闲置检查（与刷新同节奏）
 })
 </script>
 
@@ -223,16 +287,15 @@ onMounted(() => {
         </ul>
       </div>
 
-      <!-- ④ 本日活动条 -->
+      <!-- ④ 本日活动条 + 常显预览窗（三态：最近1h/跟随/锁定） -->
       <div class="timeline-wrap">
-        <div ref="barEl" class="timeline" @mousemove="onBarMove" @mouseleave="hoverSeg = null; hoverTime = null">
-          <!-- A：hover 放大窗在主条上的边界高亮 -->
+        <div ref="barEl" class="timeline" @mousemove="onBarMove" @click="onBarClick" @mouseleave="onBarLeave">
+          <!-- 当前窗口在主条上的边界高亮 -->
           <div
-            v-if="hoverTime !== null"
             class="hover-mask"
             :style="{
-              left: (hoverWindow ? (hoverWindow.winStart / timeline.total) * 100 : 0) + '%',
-              width: (hoverWindow ? ((hoverWindow.winEnd - hoverWindow.winStart) / timeline.total) * 100 : 0) + '%',
+              left: (winWindow.winStart / timeline.total) * 100 + '%',
+              width: ((winWindow.winEnd - winWindow.winStart) / timeline.total) * 100 + '%',
             }"
           />
           <div
@@ -243,23 +306,29 @@ onMounted(() => {
             :style="{ width: timeline.widths[i] + '%', background: CAT_COLORS[s.type] ?? '#888' }"
           />
           <!-- 未来时段（now → 24:00）黑色 -->
-          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: Math.max(1.5, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
+          <div v-if="timeline.now < timeline.end" class="tseg future" :style="{ width: Math.max(0.3, ((timeline.end - timeline.now) / timeline.total) * 100) + '%' }" />
         </div>
         <div class="tlabel"><span>0:00</span><span>24:00</span></div>
 
-        <!-- A：hover 放大浮层（±30 分钟窗，每段 ≥6px + 详情） -->
-        <div v-if="hoverWindow && hoverWindow.segs.length" class="zoom">
-          <div class="zoom-head">{{ fmtTime(timeline.start + hoverWindow.winStart) }}–{{ fmtTime(timeline.start + hoverWindow.winEnd) }}</div>
+        <!-- 预览窗（常显） -->
+        <div class="zoom">
+          <div class="zoom-head">
+            <span>{{ fmtTime(timeline.start + winWindow.winStart) }}–{{ fmtTime(timeline.start + winWindow.winEnd) }}</span>
+            <span class="zoom-mode" :class="winWindow.mode">{{ winWindow.mode === 'auto' ? '最近 1 小时' : (winWindow.mode === 'lock' ? '已锁定' : '跟随') }}</span>
+            <button v-if="winWindow.mode !== 'auto'" class="zoom-back" title="回到最近 1 小时" @click="winMode = 'auto'; winCenter = null; hoverSeg = null">⟲</button>
+          </div>
           <div class="zoom-bar">
             <div
-              v-for="(s, i) in hoverWindow.segs"
+              v-for="(s, i) in winWindow.segs"
               :key="i"
               class="zseg"
               :style="{ width: s.w + '%', background: CAT_COLORS[s.type] ?? '#888' }"
-              :title="fmtSeg(s)"
+              @mouseenter="hoverSeg = s"
+              @mouseleave="hoverSeg = null"
             />
+            <div v-if="!winWindow.segs.length" class="zseg empty" style="width: 100%; background: #222" />
           </div>
-          <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : '（该时段无记录）' }}</div>
+          <div class="zoom-detail">{{ hoverSeg ? fmtSeg(hoverSeg) : winSummary }}</div>
         </div>
       </div>
 
@@ -346,7 +415,13 @@ onMounted(() => {
   margin-top: 6px; background: var(--bg-surface, rgba(0, 0, 0, 0.4)); border: 1px solid var(--border-subtle);
   border-radius: 6px; padding: 6px 8px;
 }
-.zoom-head { font-size: 10px; color: var(--text-tertiary); margin-bottom: 4px; font-family: 'Courier New', monospace; }
+.zoom-head { font-size: 10px; color: var(--text-tertiary); margin-bottom: 4px; font-family: 'Courier New', monospace; display: flex; align-items: center; gap: 6px; }
+.zoom-mode { font-size: 9px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border-subtle); font-family: inherit; }
+.zoom-mode.auto { color: var(--text-muted); }
+.zoom-mode.follow { color: var(--accent-strong); border-color: var(--accent); }
+.zoom-mode.lock { color: #c07a1f; border-color: #c07a1f; }
+.zoom-back { margin-left: auto; border: 1px solid var(--border-subtle); background: none; color: var(--text-muted); border-radius: 4px; font-size: 10px; cursor: pointer; padding: 0 4px; }
+.zoom-back:hover { color: var(--accent-strong); border-color: var(--accent); }
 .zoom-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: #222; }
 .zseg { height: 100%; min-width: 6px; }
 .zoom-detail { margin-top: 4px; font-size: 10px; color: var(--text-secondary); white-space: pre-line; line-height: 1.4; }
