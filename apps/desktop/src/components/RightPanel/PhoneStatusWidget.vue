@@ -329,7 +329,7 @@ onMounted(() => {
 
     <div v-if="error" class="unavailable">{{ error }}</div>
 
-    <template v-else-if="state">
+    <template v-else-if="phone">
       <!-- ① 前台进程（检测器在线状态已移到标题栏红绿点） -->
       <ul class="procs">
         <li v-for="(r, i) in procRows" :key="i">
@@ -424,7 +424,7 @@ onMounted(() => {
       </div>
     </template>
 
-    <div v-else class="unavailable">暂未获取到本地状态</div>
+    <div v-else class="unavailable">手机端待接入（MOCK 数据接口未接）</div>
   </div>
 </template>
 
